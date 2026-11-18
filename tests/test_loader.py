@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 
 import pytest
@@ -19,8 +20,14 @@ from metal_kernels.__main__ import main
 
 
 def test_import_does_not_load_gpu_frameworks():
-    assert "mlx" not in sys.modules
-    assert "torch" not in sys.modules
+    # A fresh interpreter. Other tests may import PyTorch in this process.
+    script = (
+        "import metal_kernels, sys; "
+        "assert 'torch' not in sys.modules; "
+        "assert 'mlx' not in sys.modules; "
+        "assert 'sam3' not in sys.modules"
+    )
+    subprocess.run([sys.executable, "-c", script], check=True)
 
 
 def test_host_flag_matches_platform():
