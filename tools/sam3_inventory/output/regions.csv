@@ -1,0 +1,16 @@
+stage_region,rank_flops
+image_backbone:vision_encoder,5398574137344
+tracker_memory:tracker_memory_attention,281389563904
+image_detector:detector_encoder,255906938880
+image_backbone:vision_neck,214884679680
+image_detector:mask_head,143334899712
+image_detector:detector_decoder,20682537984
+image_text:text_encoder,19478347776
+tracker_init:tracker_memory_encoder,14691041280
+tracker_memory:tracker_memory_encoder,14691041280
+tracker_init:tracker_mask_decoder,6634049024
+tracker_memory:tracker_mask_decoder,4595617280
+image_detector:geometry_encoder,4101573632
+image_detector:scoring,227237888
+tracker_memory:tracker_other,425984
+tracker_init:tracker_other,393216

@@ -1,0 +1,7 @@
+# Extra packages the SAM 3 import graph needs beyond sam3/pyproject.toml.
+# torch and torchvision are installed from the CPU wheel index; see README.md.
+einops==0.8.2
+triton==3.9.0
+pycocotools==2.0.11
+psutil==7.2.2
+numpy>=1.26,<2

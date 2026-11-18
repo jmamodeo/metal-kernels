@@ -39,12 +39,9 @@ Add a script under `bench/` that times the kernel against the built-in framework
 
 ## SAM 3 op inventory
 
-Not started. No model graph has been traced in this repository, so there are no kernel tasks yet.
+Traced in [sam3-op-inventory.md](sam3-op-inventory.md). One random-init forward pass at 1008px is 6.379e12 rank FLOPs: matmul 75.8%, attention 18.4%, convolution 5.7%. The vision encoder is 84.6% of that. The write-up has the shapes, the CUDA blockers, and the source review of PyTorch MPS 2.15.0 and MLX 0.32.4.
 
-The table will be filled by walking the official SAM 3 PyTorch modules — the shared vision encoder, the detector and its presence head, and the memory-based tracker — and marking each op that still needs a kernel after MPS and MLX. Rows land here when that pass happens, each with a kernel name and a status.
-
-| Op | Where it shows up | Framework coverage | Kernel in this repo |
-| --- | --- | --- | --- |
+No kernel is queued from this pass yet. MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU in the sources reviewed there, and none of that has been timed on a Mac. The first measurement is the vision-encoder SDPA at `[1, 16, 5184, 64]` and the MLP GEMMs at 5184 tokens. A custom kernel is justified only where that measurement shows a fallback or a large gap. The tracker memory attention (head dim 256, K length 5184 or 5188) is the most likely miss. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
 
 ## Later
 
