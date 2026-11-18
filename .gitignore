@@ -30,6 +30,9 @@ DerivedData/
 *.dSYM/
 *.metallib
 
+# Machine-specific benchmark output
+bench/sam3_shapes/output/
+
 # OS / editor
 .DS_Store
 *~
