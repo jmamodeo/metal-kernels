@@ -43,6 +43,10 @@ Traced in [sam3-op-inventory.md](sam3-op-inventory.md). One random-init forward 
 
 No kernel is queued from this pass yet. MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU in the sources reviewed there, and none of that has been timed on a Mac. The first measurement is the vision-encoder SDPA at `[1, 16, 5184, 64]` and the MLP GEMMs at 5184 tokens. A custom kernel is justified only where that measurement shows a fallback or a large gap. The tracker memory attention (head dim 256, K length 5184 or 5188) is the most likely miss. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
 
+## MPS baseline
+
+`metal_kernels.integrations.sam3.install()` patches the pinned SAM 3 checkout so the image path and the tracker run on CPU or MPS with built-in ops. It does not fork SAM 3. The Mac timings for the inventory's top shapes are [bench/sam3_shapes](../bench/sam3_shapes/README.md). A Mac run of that script is still what confirms MPS; this repository has not executed MPS.
+
 ## Later
 
-Weight loading, a SAM 3 forward pass, and a demo sit on top of the kernels above. They wait until the inventory says which kernels a forward pass needs.
+Weight loading and a demo sit on top of the baseline above. Custom kernels wait on the Mac timings: a kernel is justified where a built-in falls back or is far from the shape in the inventory.

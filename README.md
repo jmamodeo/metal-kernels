@@ -2,7 +2,7 @@
 
 Community collection of Apple Metal GPU kernels. The long-term goal is to run Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3) entirely on Metal on Apple silicon.
 
-The kernel registry is empty. This repository is the skeleton: the shared layout, the per-kernel workflow, and Python and Swift packages that both read `kernels/`. Nothing here compiles a shader or runs SAM 3.
+The kernel registry is empty. This repository is the skeleton: the shared layout, the per-kernel workflow, and Python and Swift packages that both read `kernels/`. Nothing here compiles a shader. `metal_kernels.integrations.sam3` is a load-time patch so the pinned SAM 3 checkout can run on CPU or MPS with built-in ops. `bench/sam3_shapes/` times those ops on a Mac.
 
 ## Layout
 
