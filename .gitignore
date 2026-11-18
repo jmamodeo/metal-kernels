@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Packaging
+build/
+dist/
+
+# Swift / Xcode
+.build/
+.swiftpm/
+Packages/
+Package.pins
+xcuserdata/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+*.xcuserstate
+*.dSYM/
+*.metallib
+
+# OS / editor
+.DS_Store
+*~
+.idea/
