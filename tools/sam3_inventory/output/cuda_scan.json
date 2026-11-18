@@ -1,0 +1,164 @@
+{
+  "pattern_hits": {
+    "triton_import": [
+      "sam3/model/edt.py:2",
+      "sam3/perflib/triton/connected_components.py:2",
+      "sam3/perflib/triton/nms.py:2",
+      "sam3/train/loss/sigmoid_focal_loss.py:2"
+    ],
+    "flash_attn": [
+      "sam3/model/decoder.py:2",
+      "sam3/model/model_misc.py:7",
+      "sam3/model/vitdet.py:2",
+      "sam3/perflib/fa3.py:7",
+      "sam3/sam/transformer.py:4"
+    ],
+    "float8": [
+      "sam3/perflib/fa3.py:2"
+    ],
+    "tensor_cuda": [
+      "sam3/model/io_utils.py:12",
+      "sam3/model/sam3_tracker_base.py:2",
+      "sam3/model/sam3_tracking_predictor.py:2",
+      "sam3/model/sam3_video_predictor.py:2",
+      "sam3/model/video_tracking_multiplex.py:4",
+      "sam3/model/video_tracking_multiplex_demo.py:2",
+      "sam3/model_builder.py:2",
+      "sam3/train/utils/distributed.py:1"
+    ],
+    "device_cuda": [
+      "sam3/model/decoder.py:1",
+      "sam3/model/position_encoding.py:1",
+      "sam3/model/sam3_image_processor.py:1",
+      "sam3/model/vl_combiner.py:3",
+      "sam3/model_builder.py:3",
+      "sam3/train/utils/distributed.py:1"
+    ],
+    "autocast_cuda": [
+      "sam3/model/decoder.py:1",
+      "sam3/model/sam3_base_predictor.py:2",
+      "sam3/model/sam3_multiplex_base.py:2",
+      "sam3/model/sam3_multiplex_tracking.py:2",
+      "sam3/model/sam3_multiplex_video_predictor.py:1",
+      "sam3/model/sam3_tracking_predictor.py:1",
+      "sam3/model/sam3_video_inference.py:2",
+      "sam3/model/video_tracking_multiplex_demo.py:1",
+      "sam3/train/trainer.py:2"
+    ],
+    "torch_compile": [
+      "sam3/model/decoder.py:1",
+      "sam3/model/encoder.py:1",
+      "sam3/model/maskformer_segmentation.py:1",
+      "sam3/model/sam3_multiplex_detector_utils.py:1",
+      "sam3/model/sam3_multiplex_tracking.py:7",
+      "sam3/model/sam3_tracker_base.py:1",
+      "sam3/model/sam3_video_inference.py:5",
+      "sam3/model/text_encoder_ve.py:1",
+      "sam3/model/video_tracking_multiplex.py:4",
+      "sam3/model/vitdet.py:1",
+      "sam3/model/vl_combiner.py:2",
+      "sam3/perflib/compile.py:1"
+    ],
+    "bfloat16": [
+      "sam3/model/sam3_base_predictor.py:2",
+      "sam3/model/sam3_image.py:3",
+      "sam3/model/sam3_multiplex_base.py:5",
+      "sam3/model/sam3_multiplex_detector.py:6",
+      "sam3/model/sam3_multiplex_tracking.py:2",
+      "sam3/model/sam3_multiplex_video_predictor.py:2",
+      "sam3/model/sam3_tracker_base.py:1",
+      "sam3/model/sam3_tracking_predictor.py:3",
+      "sam3/model/sam3_video_base.py:1",
+      "sam3/model/sam3_video_inference.py:2",
+      "sam3/model/video_tracking_multiplex.py:1",
+      "sam3/model/video_tracking_multiplex_demo.py:3",
+      "sam3/perflib/fa3.py:2",
+      "sam3/perflib/fused.py:3",
+      "sam3/train/loss/loss_fns.py:1",
+      "sam3/train/trainer.py:2",
+      "sam3/train/utils/train_utils.py:3"
+    ],
+    "cc_torch": [
+      "sam3/model/sam3_tracker_utils.py:4",
+      "sam3/perflib/connected_components.py:3"
+    ]
+  },
+  "confirmed_snippets": {
+    "position_encoding_cuda_alloc": {
+      "path": "sam3/model/position_encoding.py",
+      "snippet": "device=\"cuda\"",
+      "present": true
+    },
+    "decoder_coord_cache_cuda": {
+      "path": "sam3/model/decoder.py",
+      "snippet": "device=\"cuda\"",
+      "present": true
+    },
+    "decoder_ffn_cuda_autocast": {
+      "path": "sam3/model/decoder.py",
+      "snippet": "torch.amp.autocast(device_type=\"cuda\"",
+      "present": true
+    },
+    "tracker_maskmem_cuda": {
+      "path": "sam3/model/sam3_tracker_base.py",
+      "snippet": ".cuda(",
+      "present": true
+    },
+    "geometry_encoder_pin_memory": {
+      "path": "sam3/model/geometry_encoders.py",
+      "snippet": ".pin_memory(",
+      "present": true
+    },
+    "tracker_relpos_pin_memory": {
+      "path": "sam3/model/sam3_tracker_base.py",
+      "snippet": ".pin_memory(",
+      "present": true
+    },
+    "tracker_predictor_bf16_autocast": {
+      "path": "sam3/model/sam3_tracking_predictor.py",
+      "snippet": "torch.autocast(device_type=\"cuda\", dtype=torch.bfloat16)",
+      "present": true
+    },
+    "video_inference_bf16_autocast": {
+      "path": "sam3/model/sam3_video_inference.py",
+      "snippet": "device_type=\"cuda\", dtype=torch.bfloat16",
+      "present": true
+    },
+    "edt_triton_import": {
+      "path": "sam3/model/edt.py",
+      "snippet": "import triton",
+      "present": true
+    },
+    "edt_imported_by_tracker_utils": {
+      "path": "sam3/model/sam3_tracker_utils.py",
+      "snippet": "from sam3.model.edt import edt_triton",
+      "present": true
+    },
+    "fa3_float8": {
+      "path": "sam3/perflib/fa3.py",
+      "snippet": "float8_e4m3fn",
+      "present": true
+    },
+    "fused_bf16_addmm": {
+      "path": "sam3/perflib/fused.py",
+      "snippet": "torch.bfloat16",
+      "present": true
+    },
+    "triton_nms": {
+      "path": "sam3/perflib/triton/nms.py",
+      "snippet": "import triton",
+      "present": true
+    },
+    "triton_connected_components": {
+      "path": "sam3/perflib/triton/connected_components.py",
+      "snippet": "import triton",
+      "present": true
+    },
+    "training_triton_focal_loss": {
+      "path": "sam3/train/loss/sigmoid_focal_loss.py",
+      "snippet": "import triton",
+      "present": true
+    }
+  },
+  "missing_expected": []
+}

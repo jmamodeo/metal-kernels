@@ -1,0 +1,3633 @@
+{
+  "metadata": {
+    "sam3_sha": "31cb7e624e4fe95301b1be1d4e809111593d2e45",
+    "sam3_sha_pinned": "31cb7e624e4fe95301b1be1d4e809111593d2e45",
+    "torch": "2.15.0+cpu",
+    "image_size": 1008,
+    "parameter_dtype": "float32",
+    "compute_dtype": "bfloat16",
+    "dtype_reason": "Parameters stay float32. Each traced stage runs under torch.autocast(device_type='cpu', dtype=torch.bfloat16). sam3/model/vitdet.py Mlp.forward calls sam3/perflib/fused.py addmm_act, which casts that linear and its activation to bfloat16 regardless. Without autocast the next float32 linear raises 'mat1 and mat2 must have the same dtype, but got BFloat16 and Float'. Casting every parameter to bfloat16 instead makes the CPU layer_norm kernel raise 'expect parameter to have scalar type of Float'. Official inference uses a CUDA bfloat16 autocast over float32 weights. This is the CPU equivalent, not a Metal run. Complex RoPE buffers stay complex.",
+    "prompt": "a red cube",
+    "weights": "random initialization, load_from_HF=False",
+    "device": "cpu",
+    "cuda_available": false,
+    "params_image": 840509750,
+    "cuda_factory_redirects": {
+      "torch.zeros device=cuda": 16,
+      "torch.arange device=cuda": 2
+    },
+    "pin_memory_identity_calls": 2,
+    "pin_memory_reason": "geometry_encoders.py and sam3_tracker_base.py call Tensor.pin_memory() before .to(device). With no accelerator that raises 'Cannot access accelerator device when none is available'. The trace returns the same CPU tensor from pin_memory so roi_align and the tracker still run. The call count is pin_memory_identity_calls.",
+    "tracker_build_warnings": [
+      "UserWarning: CUDA is not available or torch_xla is imported. Disabling autocast."
+    ],
+    "tracker_frame2_unpatched": {
+      "raised": true,
+      "type": "AssertionError",
+      "message": "Torch not compiled with CUDA enabled",
+      "traceback": "Traceback (most recent call last):\n  File \"/workspace/tools/sam3_inventory/inventory.py\", line 775, in run_tracker\n    tracker.track_step(frame_idx=1, is_init_cond_frame=False, **cloned_common())\n  File \"/tmp/sam3/sam3/model/sam3_tracker_base.py\", line 970, in track_step\n    pix_feat_with_mem = self._prepare_memory_conditioned_features(\n                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/sam3/sam3/model/sam3_tracker_base.py\", line 656, in _prepare_memory_conditioned_features\n    feats = prev[\"maskmem_features\"].cuda(non_blocking=True)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/sam3-venv/lib/python3.12/site-packages/torch/cuda/__init__.py\", line 609, in _lazy_init\n    raise AssertionError(\"Torch not compiled with CUDA enabled\")\nAssertionError: Torch not compiled with CUDA enabled\n"
+    },
+    "tracker_frame2_patch": "Tensor.cuda patched to identity so the memory-conditioned step could run on CPU. The unpatched call is recorded separately and raises.",
+    "fpn_level_shapes_nchw": [
+      [
+        1,
+        256,
+        288,
+        288
+      ],
+      [
+        1,
+        256,
+        144,
+        144
+      ],
+      [
+        1,
+        256,
+        72,
+        72
+      ]
+    ],
+    "seconds_including_dispatcher": {
+      "image_backbone": 3.129040494000037,
+      "image_text": 0.17334216599965657,
+      "image_detector": 0.9220646609996948,
+      "tracker_init": 0.27534283000022697,
+      "tracker_memory": 0.3665428859999338
+    },
+    "unsupported_ops": {
+      "image_backbone": {},
+      "image_text": {},
+      "image_detector": {},
+      "tracker_init": {},
+      "tracker_memory": {}
+    },
+    "meta_op_counts": {},
+    "notes": [
+      "rank_flops is FlopCounterMode plus the matmul formula for aten._addmm_activation. That op has no counter formula and does not decompose on this CPU build, so the counter total omits the ViT MLP's fused linear+GELU.",
+      "Multiply-adds count as 2. The counter also omits layer norm, GELU, softmax, elementwise ops, and the softmax inside SDPA. extra_flops estimates those (5 per norm element, 8 per GELU, 5 per softmax, 1 per pointwise op). The fused GELU inside _addmm_activation is in extra_flops, not in rank_flops.",
+      "formula_flops applies the counter's matmul, convolution, and SDPA formulas to the aten ops recorded by the tracer.",
+      "bytes count distinct input and output storages at the aten boundary. Views are included, so the view family's byte share is not traffic. aten._to_copy is mostly the bfloat16 autocast casting float32 weights. The SDPA score matrix is not a separate tensor on this CPU kernel.",
+      "Compute dtype is bfloat16 under CPU autocast. Parameters stay float32. See metadata.dtype_reason.",
+      "Wall times include the Python dispatcher and are not a model benchmark.",
+      "No MPS or MLX kernel was executed."
+    ]
+  },
+  "summary": {
+    "counter_total_flops": 4770190361600,
+    "counter_omits_addmm_activation": true,
+    "rank_total_flops": 6379192484864,
+    "counter_by_op": {
+      "aten.convolution": 366063058944,
+      "aten.addmm": 3208327569408,
+      "aten._scaled_dot_product_flash_attention_for_cpu": 1176063708160,
+      "aten.mm": 38864896,
+      "aten.bmm": 19676783616,
+      "aten.baddbmm": 20376576
+    },
+    "bytes_total": 65290861632,
+    "families": [
+      {
+        "family": "matmul",
+        "calls": 660,
+        "bytes": 9056834696,
+        "counter_flops": 3228063594496,
+        "missed_by_counter_flops": 1609002123264,
+        "rank_flops": 4837065717760,
+        "formula_flops": 4837065717760,
+        "extra_flops": 6285164544,
+        "top_ops": [
+          [
+            "aten.addmm",
+            591
+          ],
+          [
+            "aten._addmm_activation",
+            32
+          ],
+          [
+            "aten.bmm",
+            26
+          ],
+          [
+            "aten.baddbmm",
+            6
+          ],
+          [
+            "aten.mm",
+            5
+          ]
+        ],
+        "bytes_share": 0.1387151964243816,
+        "rank_share": 0.7582567431907681
+      },
+      {
+        "family": "attention",
+        "calls": 103,
+        "bytes": 1737471520,
+        "counter_flops": 1176063708160,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 1176063708160,
+        "formula_flops": 1176063708160,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten._scaled_dot_product_flash_attention_for_cpu",
+            103
+          ]
+        ],
+        "bytes_share": 0.02661125120071076,
+        "rank_share": 0.18435933873299215
+      },
+      {
+        "family": "conv",
+        "calls": 41,
+        "bytes": 830581794,
+        "counter_flops": 366063058944,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 366063058944,
+        "formula_flops": 366063058944,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten.convolution",
+            41
+          ]
+        ],
+        "bytes_share": 0.01272125643985865,
+        "rank_share": 0.05738391807623974
+      },
+      {
+        "family": "norm",
+        "calls": 224,
+        "bytes": 3133546064,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 2140848640,
+        "top_ops": [
+          [
+            "aten.native_layer_norm",
+            222
+          ],
+          [
+            "aten.native_group_norm",
+            2
+          ]
+        ],
+        "bytes_share": 0.04799363931910808,
+        "rank_share": 0.0
+      },
+      {
+        "family": "elementwise",
+        "calls": 1044,
+        "bytes": 8850196892,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 893962574,
+        "top_ops": [
+          [
+            "aten.add",
+            397
+          ],
+          [
+            "aten.mul",
+            260
+          ],
+          [
+            "aten.sub",
+            88
+          ],
+          [
+            "aten.div",
+            87
+          ],
+          [
+            "aten.clamp",
+            46
+          ],
+          [
+            "aten.sin",
+            33
+          ],
+          [
+            "aten.cos",
+            33
+          ],
+          [
+            "aten.pow",
+            23
+          ]
+        ],
+        "bytes_share": 0.13555031547726412,
+        "rank_share": 0.0
+      },
+      {
+        "family": "activation",
+        "calls": 154,
+        "bytes": 992290884,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 609821041,
+        "top_ops": [
+          [
+            "aten.relu",
+            100
+          ],
+          [
+            "aten.gelu",
+            41
+          ],
+          [
+            "aten.sigmoid",
+            13
+          ]
+        ],
+        "bytes_share": 0.015198005650359864,
+        "rank_share": 0.0
+      },
+      {
+        "family": "softmax",
+        "calls": 12,
+        "bytes": 9030528,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 11288160,
+        "top_ops": [
+          [
+            "aten._softmax",
+            12
+          ]
+        ],
+        "bytes_share": 0.00013831228098809477,
+        "rank_share": 0.0
+      },
+      {
+        "family": "view",
+        "calls": 3763,
+        "bytes": 21257124386,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten.view",
+            1698
+          ],
+          [
+            "aten._unsafe_view",
+            559
+          ],
+          [
+            "aten.transpose",
+            452
+          ],
+          [
+            "aten.unsqueeze",
+            263
+          ],
+          [
+            "aten.permute",
+            223
+          ],
+          [
+            "aten.select",
+            191
+          ],
+          [
+            "aten.slice",
+            112
+          ],
+          [
+            "aten.view_as_complex",
+            80
+          ]
+        ],
+        "bytes_share": 0.32557579812335596,
+        "rank_share": 0.0
+      },
+      {
+        "family": "memory",
+        "calls": 2135,
+        "bytes": 14958428403,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten._to_copy",
+            1874
+          ],
+          [
+            "aten.clone",
+            140
+          ],
+          [
+            "aten.cat",
+            61
+          ],
+          [
+            "aten.stack",
+            45
+          ],
+          [
+            "aten.copy_",
+            15
+          ]
+        ],
+        "bytes_share": 0.22910447234270617,
+        "rank_share": 0.0
+      },
+      {
+        "family": "other",
+        "calls": 1149,
+        "bytes": 3671085177,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten.t",
+            627
+          ],
+          [
+            "aten.detach",
+            70
+          ],
+          [
+            "aten.eq",
+            56
+          ],
+          [
+            "aten.unbind",
+            44
+          ],
+          [
+            "aten.split",
+            42
+          ],
+          [
+            "aten._local_scalar_dense",
+            42
+          ],
+          [
+            "aten.mean",
+            40
+          ],
+          [
+            "aten.zeros_like",
+            37
+          ]
+        ],
+        "bytes_share": 0.05622663088276274,
+        "rank_share": 0.0
+      },
+      {
+        "family": "embedding",
+        "calls": 4,
+        "bytes": 405017088,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten.embedding",
+            4
+          ]
+        ],
+        "bytes_share": 0.00620327374882575,
+        "rank_share": 0.0
+      },
+      {
+        "family": "index",
+        "calls": 31,
+        "bytes": 328041528,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten.index",
+            15
+          ],
+          [
+            "aten._unsafe_index",
+            14
+          ],
+          [
+            "aten.scatter",
+            2
+          ]
+        ],
+        "bytes_share": 0.005024309984587829,
+        "rank_share": 0.0
+      },
+      {
+        "family": "pool",
+        "calls": 1,
+        "bytes": 37158912,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten.max_pool2d_with_indices",
+            1
+          ]
+        ],
+        "bytes_share": 0.0005691288347432051,
+        "rank_share": 0.0
+      },
+      {
+        "family": "upsample",
+        "calls": 3,
+        "bytes": 24053760,
+        "counter_flops": 0,
+        "missed_by_counter_flops": 0,
+        "rank_flops": 0,
+        "formula_flops": 0,
+        "extra_flops": 0,
+        "top_ops": [
+          [
+            "aten._upsample_bilinear2d_aa",
+            2
+          ],
+          [
+            "aten.grid_sampler_2d",
+            1
+          ]
+        ],
+        "bytes_share": 0.00036840929034716405,
+        "rank_share": 0.0
+      }
+    ],
+    "regions_rank_flops": [
+      {
+        "stage_region": "image_backbone:vision_encoder",
+        "rank_flops": 5398574137344
+      },
+      {
+        "stage_region": "tracker_memory:tracker_memory_attention",
+        "rank_flops": 281389563904
+      },
+      {
+        "stage_region": "image_detector:detector_encoder",
+        "rank_flops": 255906938880
+      },
+      {
+        "stage_region": "image_backbone:vision_neck",
+        "rank_flops": 214884679680
+      },
+      {
+        "stage_region": "image_detector:mask_head",
+        "rank_flops": 143334899712
+      },
+      {
+        "stage_region": "image_detector:detector_decoder",
+        "rank_flops": 20682537984
+      },
+      {
+        "stage_region": "image_text:text_encoder",
+        "rank_flops": 19478347776
+      },
+      {
+        "stage_region": "tracker_init:tracker_memory_encoder",
+        "rank_flops": 14691041280
+      },
+      {
+        "stage_region": "tracker_memory:tracker_memory_encoder",
+        "rank_flops": 14691041280
+      },
+      {
+        "stage_region": "tracker_init:tracker_mask_decoder",
+        "rank_flops": 6634049024
+      },
+      {
+        "stage_region": "tracker_memory:tracker_mask_decoder",
+        "rank_flops": 4595617280
+      },
+      {
+        "stage_region": "image_detector:geometry_encoder",
+        "rank_flops": 4101573632
+      },
+      {
+        "stage_region": "image_detector:scoring",
+        "rank_flops": 227237888
+      },
+      {
+        "stage_region": "tracker_memory:tracker_other",
+        "rank_flops": 425984
+      },
+      {
+        "stage_region": "tracker_init:tracker_other",
+        "rank_flops": 393216
+      }
+    ],
+    "regions_bytes": [
+      {
+        "stage_region": "image_backbone:vision_encoder",
+        "bytes": 47437494784,
+        "calls": 1968
+      },
+      {
+        "stage_region": "image_text:text_encoder",
+        "bytes": 3602886656,
+        "calls": 1348
+      },
+      {
+        "stage_region": "tracker_memory:tracker_memory_attention",
+        "bytes": 2422362112,
+        "calls": 508
+      },
+      {
+        "stage_region": "image_detector:detector_decoder",
+        "bytes": 2347297868,
+        "calls": 2321
+      },
+      {
+        "stage_region": "image_detector:detector_encoder",
+        "bytes": 2058515996,
+        "calls": 675
+      },
+      {
+        "stage_region": "image_detector:mask_head",
+        "bytes": 1641832098,
+        "calls": 131
+      },
+      {
+        "stage_region": "image_backbone:vision_neck",
+        "bytes": 957548544,
+        "calls": 47
+      },
+      {
+        "stage_region": "tracker_init:tracker_memory_encoder",
+        "bytes": 889010976,
+        "calls": 171
+      },
+      {
+        "stage_region": "tracker_memory:tracker_memory_encoder",
+        "bytes": 889010976,
+        "calls": 171
+      },
+      {
+        "stage_region": "tracker_init:tracker_other",
+        "bytes": 719076673,
+        "calls": 113
+      },
+      {
+        "stage_region": "tracker_init:tracker_mask_decoder",
+        "bytes": 620642476,
+        "calls": 525
+      },
+      {
+        "stage_region": "tracker_memory:tracker_other",
+        "bytes": 579926053,
+        "calls": 141
+      },
+      {
+        "stage_region": "tracker_memory:tracker_mask_decoder",
+        "bytes": 556744108,
+        "calls": 519
+      },
+      {
+        "stage_region": "image_detector:geometry_encoder",
+        "bytes": 266745767,
+        "calls": 498
+      },
+      {
+        "stage_region": "image_backbone:other",
+        "bytes": 169205760,
+        "calls": 4
+      },
+      {
+        "stage_region": "image_detector:other",
+        "bytes": 113242082,
+        "calls": 127
+      },
+      {
+        "stage_region": "image_detector:scoring",
+        "bytes": 19171215,
+        "calls": 46
+      },
+      {
+        "stage_region": "image_text:other",
+        "bytes": 147488,
+        "calls": 11
+      }
+    ],
+    "top_shapes": [
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 110075314176,
+        "extra_flops": 0,
+        "bytes": 42799104,
+        "module": "backbone.vision_backbone.trunk.blocks.7.attn"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 110075314176,
+        "extra_flops": 0,
+        "bytes": 42799104,
+        "module": "backbone.vision_backbone.trunk.blocks.15.attn"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 110075314176,
+        "extra_flops": 0,
+        "bytes": 42799104,
+        "module": "backbone.vision_backbone.trunk.blocks.23.attn"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 110075314176,
+        "extra_flops": 0,
+        "bytes": 42799104,
+        "module": "backbone.vision_backbone.trunk.blocks.31.attn"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ],
+          [
+            256,
+            256,
+            3,
+            3
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 97844723712,
+        "extra_flops": 0,
+        "bytes": 86114816,
+        "module": "backbone.vision_backbone.convs.0.conv_3x3"
+      },
+      {
+        "stage": "image_detector",
+        "region": "mask_head",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ],
+          [
+            256,
+            256,
+            3,
+            3
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 97844723712,
+        "extra_flops": 0,
+        "bytes": 86114816,
+        "module": "segmentation_head.pixel_decoder.conv_layers.1"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.0.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.1.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.2.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.3.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.4.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.5.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.6.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.7.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.8.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.9.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.10.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.11.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.12.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.13.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.14.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.15.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.16.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.17.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.18.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.19.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.20.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.21.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.22.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.23.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.24.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.25.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.26.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.27.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.28.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.29.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.30.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 196411392,
+        "bytes": 69428480,
+        "module": "backbone.vision_backbone.trunk.blocks.31.mlp"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1024
+          ],
+          [
+            5184,
+            4736
+          ],
+          [
+            4736,
+            1024
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            1024
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 0,
+        "bytes": 69421056,
+        "module": "backbone.vision_backbone.trunk.blocks.0.mlp.fc2"
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1024
+          ],
+          [
+            5184,
+            4736
+          ],
+          [
+            4736,
+            1024
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            1024
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 50281316352,
+        "extra_flops": 0,
+        "bytes": 69421056,
+        "module": "backbone.vision_backbone.trunk.blocks.1.mlp.fc2"
+      }
+    ],
+    "grouped_shapes": [
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten._addmm_activation",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4736
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            4736
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            4736
+          ]
+        ],
+        "count": 32,
+        "formula_flops": 1609002123264,
+        "extra_flops": 6285164544,
+        "bytes": 2221711360,
+        "module": "backbone.vision_backbone.trunk.blocks.0.mlp",
+        "modules": 32
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1024
+          ],
+          [
+            5184,
+            4736
+          ],
+          [
+            4736,
+            1024
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            1024
+          ]
+        ],
+        "count": 32,
+        "formula_flops": 1609002123264,
+        "extra_flops": 0,
+        "bytes": 2221473792,
+        "module": "backbone.vision_backbone.trunk.blocks.0.mlp.fc2",
+        "modules": 32
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            3072
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            3072
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            3072
+          ]
+        ],
+        "count": 32,
+        "formula_flops": 1043677052928,
+        "extra_flops": 0,
+        "bytes": 1560477696,
+        "module": "backbone.vision_backbone.trunk.blocks.0.attn.qkv",
+        "modules": 32
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184,
+            64
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            16,
+            5184,
+            64
+          ],
+          [
+            1,
+            16,
+            5184
+          ]
+        ],
+        "count": 4,
+        "formula_flops": 440301256704,
+        "extra_flops": 0,
+        "bytes": 171196416,
+        "module": "backbone.vision_backbone.trunk.blocks.7.attn",
+        "modules": 4
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1024
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            1024
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            1024
+          ]
+        ],
+        "count": 32,
+        "formula_flops": 347892350976,
+        "extra_flops": 0,
+        "bytes": 746651648,
+        "module": "backbone.vision_backbone.trunk.blocks.0.attn.proj",
+        "modules": 32
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            9,
+            16,
+            576,
+            64
+          ],
+          [
+            9,
+            16,
+            576,
+            64
+          ],
+          [
+            9,
+            16,
+            576,
+            64
+          ]
+        ],
+        "out_shapes": [
+          [
+            9,
+            16,
+            576,
+            64
+          ],
+          [
+            9,
+            16,
+            576
+          ]
+        ],
+        "count": 28,
+        "formula_flops": 342456532992,
+        "extra_flops": 0,
+        "bytes": 1198374912,
+        "module": "backbone.vision_backbone.trunk.blocks.0.attn",
+        "modules": 28
+      },
+      {
+        "stage": "image_detector",
+        "region": "detector_encoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            8,
+            5184,
+            32
+          ],
+          [
+            1,
+            8,
+            5184,
+            32
+          ],
+          [
+            1,
+            8,
+            5184,
+            32
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            8,
+            5184,
+            32
+          ],
+          [
+            1,
+            8,
+            5184
+          ]
+        ],
+        "count": 6,
+        "formula_flops": 165112971264,
+        "extra_flops": 0,
+        "bytes": 64696320,
+        "module": "transformer.encoder.layers.0.self_attn",
+        "modules": 6
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_memory_attention",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            1,
+            5184,
+            256
+          ],
+          [
+            1,
+            1,
+            5188,
+            256
+          ],
+          [
+            1,
+            1,
+            5188,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            1,
+            5184,
+            256
+          ],
+          [
+            1,
+            1,
+            5184
+          ]
+        ],
+        "count": 4,
+        "formula_flops": 110160248832,
+        "extra_flops": 0,
+        "bytes": 42566656,
+        "module": "transformer.encoder.layers.0.cross_attn_image",
+        "modules": 4
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_memory_attention",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            1,
+            5184,
+            256
+          ],
+          [
+            1,
+            1,
+            5184,
+            256
+          ],
+          [
+            1,
+            1,
+            5184,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            1,
+            5184,
+            256
+          ],
+          [
+            1,
+            1,
+            5184
+          ]
+        ],
+        "count": 4,
+        "formula_flops": 110075314176,
+        "extra_flops": 0,
+        "bytes": 42550272,
+        "module": "transformer.encoder.layers.0.self_attn",
+        "modules": 4
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ],
+          [
+            256,
+            256,
+            3,
+            3
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 97844723712,
+        "extra_flops": 0,
+        "bytes": 86114816,
+        "module": "backbone.vision_backbone.convs.0.conv_3x3",
+        "modules": 1
+      },
+      {
+        "stage": "image_detector",
+        "region": "mask_head",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ],
+          [
+            256,
+            256,
+            3,
+            3
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 97844723712,
+        "extra_flops": 0,
+        "bytes": 86114816,
+        "module": "segmentation_head.pixel_decoder.conv_layers.1",
+        "modules": 1
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            1024,
+            72,
+            72
+          ],
+          [
+            1024,
+            512,
+            2,
+            2
+          ],
+          [
+            512
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            512,
+            144,
+            144
+          ]
+        ],
+        "count": 2,
+        "formula_flops": 43486543872,
+        "extra_flops": 0,
+        "bytes": 72091648,
+        "module": "backbone.vision_backbone.convs.0.dconv_2x2_0",
+        "modules": 2
+      },
+      {
+        "stage": "image_detector",
+        "region": "detector_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            2048
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            2048
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            2048
+          ]
+        ],
+        "count": 6,
+        "formula_flops": 32614907904,
+        "extra_flops": 0,
+        "bytes": 149643264,
+        "module": "transformer.encoder.layers.0.linear1",
+        "modules": 6
+      },
+      {
+        "stage": "image_detector",
+        "region": "detector_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            2048
+          ],
+          [
+            2048,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 6,
+        "formula_flops": 32614907904,
+        "extra_flops": 0,
+        "bytes": 149621760,
+        "module": "transformer.encoder.layers.0.linear2",
+        "modules": 6
+      },
+      {
+        "stage": "image_detector",
+        "region": "detector_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 36,
+        "formula_flops": 24461180928,
+        "extra_flops": 0,
+        "bytes": 195840000,
+        "module": "transformer.encoder.layers.0.self_attn",
+        "modules": 12
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            144,
+            144
+          ],
+          [
+            256,
+            256,
+            3,
+            3
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            144,
+            144
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 24461180928,
+        "extra_flops": 0,
+        "bytes": 22413824,
+        "module": "backbone.vision_backbone.convs.1.conv_3x3",
+        "modules": 1
+      },
+      {
+        "stage": "image_detector",
+        "region": "mask_head",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            144,
+            144
+          ],
+          [
+            256,
+            256,
+            3,
+            3
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            144,
+            144
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 24461180928,
+        "extra_flops": 0,
+        "bytes": 22413824,
+        "module": "segmentation_head.pixel_decoder.conv_layers.0",
+        "modules": 1
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_memory_attention",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            2048
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            2048
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            2048
+          ]
+        ],
+        "count": 4,
+        "formula_flops": 21743271936,
+        "extra_flops": 0,
+        "bytes": 99762176,
+        "module": "transformer.encoder.layers.0.linear1",
+        "modules": 4
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_memory_attention",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            2048
+          ],
+          [
+            2048,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 4,
+        "formula_flops": 21743271936,
+        "extra_flops": 0,
+        "bytes": 99747840,
+        "module": "transformer.encoder.layers.0.linear2",
+        "modules": 4
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            512,
+            144,
+            144
+          ],
+          [
+            512,
+            256,
+            2,
+            2
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 21743271936,
+        "extra_flops": 0,
+        "bytes": 64750080,
+        "module": "backbone.vision_backbone.convs.0.dconv_2x2_1",
+        "modules": 1
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_memory_attention",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 24,
+        "formula_flops": 16307453952,
+        "extra_flops": 0,
+        "bytes": 130560000,
+        "module": "transformer.encoder.layers.0.self_attn.q_proj",
+        "modules": 24
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ],
+          [
+            256,
+            256,
+            1,
+            1
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 10871635968,
+        "extra_flops": 0,
+        "bytes": 85066240,
+        "module": "backbone.vision_backbone.convs.0.conv_1x1",
+        "modules": 1
+      },
+      {
+        "stage": "image_detector",
+        "region": "mask_head",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ],
+          [
+            256,
+            256,
+            1,
+            1
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            288,
+            288
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 10871635968,
+        "extra_flops": 0,
+        "bytes": 85066240,
+        "module": "segmentation_head.instance_seg_head",
+        "modules": 1
+      },
+      {
+        "stage": "image_detector",
+        "region": "mask_head",
+        "family": "matmul",
+        "op": "aten.bmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            200,
+            256
+          ],
+          [
+            1,
+            256,
+            82944
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            200,
+            82944
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 8493465600,
+        "extra_flops": 0,
+        "bytes": 75747328,
+        "module": "segmentation_head.mask_predictor",
+        "modules": 1
+      },
+      {
+        "stage": "image_detector",
+        "region": "detector_decoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 12,
+        "formula_flops": 8153726976,
+        "extra_flops": 0,
+        "bytes": 65280000,
+        "module": "transformer.decoder.layers.0.cross_attn",
+        "modules": 6
+      },
+      {
+        "stage": "image_text",
+        "region": "text_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            4096
+          ],
+          [
+            32,
+            1024
+          ],
+          [
+            1024,
+            4096
+          ]
+        ],
+        "out_shapes": [
+          [
+            32,
+            4096
+          ]
+        ],
+        "count": 24,
+        "formula_flops": 6442450944,
+        "extra_flops": 0,
+        "bytes": 209387520,
+        "module": "backbone.language_backbone.encoder.transformer.resblocks.0.mlp.c_fc",
+        "modules": 24
+      },
+      {
+        "stage": "image_text",
+        "region": "text_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1024
+          ],
+          [
+            32,
+            4096
+          ],
+          [
+            4096,
+            1024
+          ]
+        ],
+        "out_shapes": [
+          [
+            32,
+            1024
+          ]
+        ],
+        "count": 24,
+        "formula_flops": 6442450944,
+        "extra_flops": 0,
+        "bytes": 209240064,
+        "module": "backbone.language_backbone.encoder.transformer.resblocks.0.mlp.c_proj",
+        "modules": 24
+      },
+      {
+        "stage": "image_detector",
+        "region": "detector_decoder",
+        "family": "attention",
+        "op": "aten._scaled_dot_product_flash_attention_for_cpu",
+        "dtypes": "bfloat16,float32",
+        "in_shapes": [
+          [
+            1,
+            8,
+            201,
+            32
+          ],
+          [
+            1,
+            8,
+            5184,
+            32
+          ],
+          [
+            1,
+            8,
+            5184,
+            32
+          ],
+          [
+            1,
+            8,
+            201,
+            5184
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            8,
+            201,
+            32
+          ],
+          [
+            1,
+            8,
+            201
+          ]
+        ],
+        "count": 6,
+        "formula_flops": 6401949696,
+        "extra_flops": 0,
+        "bytes": 133154496,
+        "module": "transformer.decoder.layers.0.cross_attn",
+        "modules": 6
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_encoder",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            3,
+            1008,
+            1008
+          ],
+          [
+            1024,
+            3,
+            14,
+            14
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            1024,
+            72,
+            72
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 6242697216,
+        "extra_flops": 0,
+        "bytes": 17917440,
+        "module": "backbone.vision_backbone.trunk.patch_embed.proj",
+        "modules": 1
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            256,
+            72,
+            72
+          ],
+          [
+            256,
+            256,
+            3,
+            3
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            72,
+            72
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 6115295232,
+        "extra_flops": 0,
+        "bytes": 6488576,
+        "module": "backbone.vision_backbone.convs.2.conv_3x3",
+        "modules": 1
+      },
+      {
+        "stage": "tracker_init",
+        "region": "tracker_memory_encoder",
+        "family": "matmul",
+        "op": "aten.bmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            72,
+            72,
+            256
+          ],
+          [
+            72,
+            256,
+            1024
+          ]
+        ],
+        "out_shapes": [
+          [
+            72,
+            72,
+            1024
+          ]
+        ],
+        "count": 2,
+        "formula_flops": 5435817984,
+        "extra_flops": 0,
+        "bytes": 102039552,
+        "module": "maskmem_backbone.fuser.layers.0.pwconv1",
+        "modules": 2
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_memory_encoder",
+        "family": "matmul",
+        "op": "aten.bmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            72,
+            72,
+            256
+          ],
+          [
+            72,
+            256,
+            1024
+          ]
+        ],
+        "out_shapes": [
+          [
+            72,
+            72,
+            1024
+          ]
+        ],
+        "count": 2,
+        "formula_flops": 5435817984,
+        "extra_flops": 0,
+        "bytes": 102039552,
+        "module": "maskmem_backbone.fuser.layers.0.pwconv1",
+        "modules": 2
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            512,
+            144,
+            144
+          ],
+          [
+            256,
+            512,
+            1,
+            1
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            144,
+            144
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 5435817984,
+        "extra_flops": 0,
+        "bytes": 32113152,
+        "module": "backbone.vision_backbone.convs.1.conv_1x1",
+        "modules": 1
+      },
+      {
+        "stage": "tracker_init",
+        "region": "tracker_memory_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 2,
+        "formula_flops": 5435817984,
+        "extra_flops": 0,
+        "bytes": 27591680,
+        "module": "maskmem_backbone.fuser.layers.0.pwconv2",
+        "modules": 2
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_memory_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            1024
+          ],
+          [
+            1024,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 2,
+        "formula_flops": 5435817984,
+        "extra_flops": 0,
+        "bytes": 27591680,
+        "module": "maskmem_backbone.fuser.layers.0.pwconv2",
+        "modules": 2
+      },
+      {
+        "stage": "image_text",
+        "region": "text_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            3072
+          ],
+          [
+            32,
+            1024
+          ],
+          [
+            1024,
+            3072
+          ]
+        ],
+        "out_shapes": [
+          [
+            32,
+            3072
+          ]
+        ],
+        "count": 24,
+        "formula_flops": 4831838208,
+        "extra_flops": 0,
+        "bytes": 157433856,
+        "module": "backbone.language_backbone.encoder.transformer.resblocks.0.attn",
+        "modules": 24
+      },
+      {
+        "stage": "image_detector",
+        "region": "geometry_encoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            256
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            256
+          ]
+        ],
+        "count": 6,
+        "formula_flops": 4076863488,
+        "extra_flops": 0,
+        "bytes": 32640000,
+        "module": "geometry_encoder.encode.0.cross_attn_image",
+        "modules": 3
+      },
+      {
+        "stage": "tracker_init",
+        "region": "tracker_mask_decoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            128
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            128
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            128
+          ]
+        ],
+        "count": 8,
+        "formula_flops": 2717908992,
+        "extra_flops": 0,
+        "bytes": 32376832,
+        "module": "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
+        "modules": 8
+      },
+      {
+        "stage": "tracker_memory",
+        "region": "tracker_mask_decoder",
+        "family": "matmul",
+        "op": "aten.addmm",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            128
+          ],
+          [
+            5184,
+            256
+          ],
+          [
+            256,
+            128
+          ]
+        ],
+        "out_shapes": [
+          [
+            5184,
+            128
+          ]
+        ],
+        "count": 8,
+        "formula_flops": 2717908992,
+        "extra_flops": 0,
+        "bytes": 32376832,
+        "module": "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
+        "modules": 8
+      },
+      {
+        "stage": "image_backbone",
+        "region": "vision_neck",
+        "family": "conv",
+        "op": "aten.convolution",
+        "dtypes": "bfloat16",
+        "in_shapes": [
+          [
+            1,
+            1024,
+            72,
+            72
+          ],
+          [
+            256,
+            1024,
+            1,
+            1
+          ],
+          [
+            256
+          ]
+        ],
+        "out_shapes": [
+          [
+            1,
+            256,
+            72,
+            72
+          ]
+        ],
+        "count": 1,
+        "formula_flops": 2717908992,
+        "extra_flops": 0,
+        "bytes": 13795840,
+        "module": "backbone.vision_backbone.convs.2.conv_1x1",
+        "modules": 1
+      }
+    ],
+    "top_leaf_modules": [
+      {
+        "stage": "image_backbone",
+        "module": "Sequential.conv_3x3",
+        "region": "vision_neck",
+        "counter_flops": 129950023680
+      },
+      {
+        "stage": "image_detector",
+        "module": "UniversalSegmentationHead.pixel_decoder.conv_layers.1",
+        "region": "mask_head",
+        "counter_flops": 97844723712
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.0.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.1.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.2.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.3.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.4.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.5.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.6.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.7.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.8.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.9.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.10.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.11.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.12.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.13.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.14.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.15.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.16.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.17.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.18.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.19.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.20.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.21.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.22.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.23.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.24.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.25.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.26.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.27.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.28.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.29.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.30.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.31.mlp.fc2",
+        "region": "vision_encoder",
+        "counter_flops": 50281316352
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.0.attn.qkv",
+        "region": "vision_encoder",
+        "counter_flops": 32614907904
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.1.attn.qkv",
+        "region": "vision_encoder",
+        "counter_flops": 32614907904
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.2.attn.qkv",
+        "region": "vision_encoder",
+        "counter_flops": 32614907904
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.3.attn.qkv",
+        "region": "vision_encoder",
+        "counter_flops": 32614907904
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.4.attn.qkv",
+        "region": "vision_encoder",
+        "counter_flops": 32614907904
+      },
+      {
+        "stage": "image_backbone",
+        "module": "ViT.blocks.5.attn.qkv",
+        "region": "vision_encoder",
+        "counter_flops": 32614907904
+      }
+    ],
+    "formula_flops_total": 6379192484864,
+    "extra_flops_total": 9941084959
+  }
+}

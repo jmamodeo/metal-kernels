@@ -1,0 +1,41 @@
+stage,region,family,op,dtypes,in_shapes,out_shapes,count,modules,formula_flops,extra_flops,bytes
+image_backbone,vision_encoder,matmul,aten._addmm_activation,bfloat16,"[[4736], [5184, 1024], [1024, 4736]]","[[5184, 4736]]",32,32,1609002123264,6285164544,2221711360
+image_backbone,vision_encoder,matmul,aten.addmm,bfloat16,"[[1024], [5184, 4736], [4736, 1024]]","[[5184, 1024]]",32,32,1609002123264,0,2221473792
+image_backbone,vision_encoder,matmul,aten.addmm,bfloat16,"[[3072], [5184, 1024], [1024, 3072]]","[[5184, 3072]]",32,32,1043677052928,0,1560477696
+image_backbone,vision_encoder,attention,aten._scaled_dot_product_flash_attention_for_cpu,"bfloat16,float32","[[1, 16, 5184, 64], [1, 16, 5184, 64], [1, 16, 5184, 64]]","[[1, 16, 5184, 64], [1, 16, 5184]]",4,4,440301256704,0,171196416
+image_backbone,vision_encoder,matmul,aten.addmm,bfloat16,"[[1024], [5184, 1024], [1024, 1024]]","[[5184, 1024]]",32,32,347892350976,0,746651648
+image_backbone,vision_encoder,attention,aten._scaled_dot_product_flash_attention_for_cpu,"bfloat16,float32","[[9, 16, 576, 64], [9, 16, 576, 64], [9, 16, 576, 64]]","[[9, 16, 576, 64], [9, 16, 576]]",28,28,342456532992,0,1198374912
+image_detector,detector_encoder,attention,aten._scaled_dot_product_flash_attention_for_cpu,"bfloat16,float32","[[1, 8, 5184, 32], [1, 8, 5184, 32], [1, 8, 5184, 32]]","[[1, 8, 5184, 32], [1, 8, 5184]]",6,6,165112971264,0,64696320
+tracker_memory,tracker_memory_attention,attention,aten._scaled_dot_product_flash_attention_for_cpu,"bfloat16,float32","[[1, 1, 5184, 256], [1, 1, 5188, 256], [1, 1, 5188, 256]]","[[1, 1, 5184, 256], [1, 1, 5184]]",4,4,110160248832,0,42566656
+tracker_memory,tracker_memory_attention,attention,aten._scaled_dot_product_flash_attention_for_cpu,"bfloat16,float32","[[1, 1, 5184, 256], [1, 1, 5184, 256], [1, 1, 5184, 256]]","[[1, 1, 5184, 256], [1, 1, 5184]]",4,4,110075314176,0,42550272
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 256, 288, 288], [256, 256, 3, 3], [256]]","[[1, 256, 288, 288]]",1,1,97844723712,0,86114816
+image_detector,mask_head,conv,aten.convolution,bfloat16,"[[1, 256, 288, 288], [256, 256, 3, 3], [256]]","[[1, 256, 288, 288]]",1,1,97844723712,0,86114816
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 1024, 72, 72], [1024, 512, 2, 2], [512]]","[[1, 512, 144, 144]]",2,2,43486543872,0,72091648
+image_detector,detector_encoder,matmul,aten.addmm,bfloat16,"[[2048], [5184, 256], [256, 2048]]","[[5184, 2048]]",6,6,32614907904,0,149643264
+image_detector,detector_encoder,matmul,aten.addmm,bfloat16,"[[256], [5184, 2048], [2048, 256]]","[[5184, 256]]",6,6,32614907904,0,149621760
+image_detector,detector_encoder,matmul,aten.addmm,bfloat16,"[[256], [5184, 256], [256, 256]]","[[5184, 256]]",36,12,24461180928,0,195840000
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 256, 144, 144], [256, 256, 3, 3], [256]]","[[1, 256, 144, 144]]",1,1,24461180928,0,22413824
+image_detector,mask_head,conv,aten.convolution,bfloat16,"[[1, 256, 144, 144], [256, 256, 3, 3], [256]]","[[1, 256, 144, 144]]",1,1,24461180928,0,22413824
+tracker_memory,tracker_memory_attention,matmul,aten.addmm,bfloat16,"[[2048], [5184, 256], [256, 2048]]","[[5184, 2048]]",4,4,21743271936,0,99762176
+tracker_memory,tracker_memory_attention,matmul,aten.addmm,bfloat16,"[[256], [5184, 2048], [2048, 256]]","[[5184, 256]]",4,4,21743271936,0,99747840
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 512, 144, 144], [512, 256, 2, 2], [256]]","[[1, 256, 288, 288]]",1,1,21743271936,0,64750080
+tracker_memory,tracker_memory_attention,matmul,aten.addmm,bfloat16,"[[256], [5184, 256], [256, 256]]","[[5184, 256]]",24,24,16307453952,0,130560000
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 256, 288, 288], [256, 256, 1, 1], [256]]","[[1, 256, 288, 288]]",1,1,10871635968,0,85066240
+image_detector,mask_head,conv,aten.convolution,bfloat16,"[[1, 256, 288, 288], [256, 256, 1, 1], [256]]","[[1, 256, 288, 288]]",1,1,10871635968,0,85066240
+image_detector,mask_head,matmul,aten.bmm,bfloat16,"[[1, 200, 256], [1, 256, 82944]]","[[1, 200, 82944]]",1,1,8493465600,0,75747328
+image_detector,detector_decoder,matmul,aten.addmm,bfloat16,"[[256], [5184, 256], [256, 256]]","[[5184, 256]]",12,6,8153726976,0,65280000
+image_text,text_encoder,matmul,aten.addmm,bfloat16,"[[4096], [32, 1024], [1024, 4096]]","[[32, 4096]]",24,24,6442450944,0,209387520
+image_text,text_encoder,matmul,aten.addmm,bfloat16,"[[1024], [32, 4096], [4096, 1024]]","[[32, 1024]]",24,24,6442450944,0,209240064
+image_detector,detector_decoder,attention,aten._scaled_dot_product_flash_attention_for_cpu,"bfloat16,float32","[[1, 8, 201, 32], [1, 8, 5184, 32], [1, 8, 5184, 32], [1, 8, 201, 5184]]","[[1, 8, 201, 32], [1, 8, 201]]",6,6,6401949696,0,133154496
+image_backbone,vision_encoder,conv,aten.convolution,bfloat16,"[[1, 3, 1008, 1008], [1024, 3, 14, 14]]","[[1, 1024, 72, 72]]",1,1,6242697216,0,17917440
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 256, 72, 72], [256, 256, 3, 3], [256]]","[[1, 256, 72, 72]]",1,1,6115295232,0,6488576
+tracker_init,tracker_memory_encoder,matmul,aten.bmm,bfloat16,"[[72, 72, 256], [72, 256, 1024]]","[[72, 72, 1024]]",2,2,5435817984,0,102039552
+tracker_memory,tracker_memory_encoder,matmul,aten.bmm,bfloat16,"[[72, 72, 256], [72, 256, 1024]]","[[72, 72, 1024]]",2,2,5435817984,0,102039552
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 512, 144, 144], [256, 512, 1, 1], [256]]","[[1, 256, 144, 144]]",1,1,5435817984,0,32113152
+tracker_init,tracker_memory_encoder,matmul,aten.addmm,bfloat16,"[[256], [5184, 1024], [1024, 256]]","[[5184, 256]]",2,2,5435817984,0,27591680
+tracker_memory,tracker_memory_encoder,matmul,aten.addmm,bfloat16,"[[256], [5184, 1024], [1024, 256]]","[[5184, 256]]",2,2,5435817984,0,27591680
+image_text,text_encoder,matmul,aten.addmm,bfloat16,"[[3072], [32, 1024], [1024, 3072]]","[[32, 3072]]",24,24,4831838208,0,157433856
+image_detector,geometry_encoder,matmul,aten.addmm,bfloat16,"[[256], [5184, 256], [256, 256]]","[[5184, 256]]",6,3,4076863488,0,32640000
+tracker_init,tracker_mask_decoder,matmul,aten.addmm,bfloat16,"[[128], [5184, 256], [256, 128]]","[[5184, 128]]",8,8,2717908992,0,32376832
+tracker_memory,tracker_mask_decoder,matmul,aten.addmm,bfloat16,"[[128], [5184, 256], [256, 128]]","[[5184, 128]]",8,8,2717908992,0,32376832
+image_backbone,vision_neck,conv,aten.convolution,bfloat16,"[[1, 1024, 72, 72], [256, 1024, 1, 1], [256]]","[[1, 256, 72, 72]]",1,1,2717908992,0,13795840
