@@ -17,4 +17,4 @@ def test_benchmark_placeholder_exits_cleanly(monkeypatch, capsys):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.main() == 0
-    assert "No benchmark is implemented for: conv3x3" in capsys.readouterr().out
+    assert "bench/conv3x3.py" in capsys.readouterr().out

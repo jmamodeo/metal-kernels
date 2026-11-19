@@ -13,7 +13,7 @@ import sys
 def host_is_macos() -> bool:
     """Return True when the host is macOS.
 
-    Metal kernels are exercised only there. This does not probe a GPU, and
-    a True result does not mean a kernel launcher exists. None does yet.
+    Metal kernels are exercised only there. This does not probe a GPU.
+    ``metal_kernels.conv3x3`` is what launches conv3x3.
     """
     return sys.platform == "darwin"

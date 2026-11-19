@@ -24,7 +24,10 @@ def main() -> int:
     if not names:
         print("No kernels to benchmark.")
         return 0
-    print("No benchmark is implemented for: " + ", ".join(names))
+    print(
+        "Benchmark scripts are not timed by this placeholder: "
+        + ", ".join(f"bench/{name}.py" for name in names)
+    )
     return 0
 
 
