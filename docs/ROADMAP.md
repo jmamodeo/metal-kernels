@@ -37,11 +37,22 @@ After the Python check matches the reference, add a Swift API on the `MetalKerne
 
 Add a script under `bench/` that times the kernel against the built-in framework implementation (MPS, MLX, or Metal Performance Shaders) when one exists. Publish the command, the shapes, the dtypes, and the machine. Leave the script out when there is no built-in op to compare, and say that in the kernel README.
 
+## conv3x3
+
+The 3×3 from the SAM 3 FPN neck and the mask-head pixel decoder. Input `[1, 256, 288, 288]`, weight `[256, 256, 3, 3]`, stride 1, padding 1, dilation 1, groups 1, with bias. The traced forward ran it in bfloat16. The reference computes float32. Rank FLOPs are 9.784e10 per call.
+
+| Step | Status |
+| --- | --- |
+| 1. NumPy reference | done (`reference/conv3x3.py`) |
+| 2. Metal kernel from Python | not started |
+| 3. Swift host | not started |
+| 4. Benchmark | not started |
+
 ## SAM 3 op inventory
 
 Traced in [sam3-op-inventory.md](sam3-op-inventory.md). One random-init forward pass at 1008px is 6.379e12 rank FLOPs: matmul 75.8%, attention 18.4%, convolution 5.7%. The vision encoder is 84.6% of that. The write-up has the shapes, the CUDA blockers, and the source review of PyTorch MPS 2.15.0 and MLX 0.32.4.
 
-No kernel is queued from this pass yet. MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU in the sources reviewed there, and none of that has been timed on a Mac. The first measurement is the vision-encoder SDPA at `[1, 16, 5184, 64]` and the MLP GEMMs at 5184 tokens. A custom kernel is justified only where that measurement shows a fallback or a large gap. The tracker memory attention (head dim 256, K length 5184 or 5188) is the most likely miss. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
+The first kernel is [conv3x3](../kernels/conv3x3/README.md). Step 1, the NumPy reference, is done. The Metal shader is not started. MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU in the sources reviewed there, and none of that has been timed on a Mac. The first measurement is the vision-encoder SDPA at `[1, 16, 5184, 64]` and the MLP GEMMs at 5184 tokens. A custom kernel is justified only where that measurement shows a fallback or a large gap. The tracker memory attention (head dim 256, K length 5184 or 5188) is the most likely miss. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
 
 ## MPS baseline
 

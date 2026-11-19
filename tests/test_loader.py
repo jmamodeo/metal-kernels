@@ -34,21 +34,25 @@ def test_host_flag_matches_platform():
     assert host_is_macos() is (sys.platform == "darwin")
 
 
-def test_checkout_has_template_and_no_kernels(monkeypatch):
+def test_checkout_registers_conv3x3_without_a_kernel_function(monkeypatch):
     monkeypatch.delenv("METAL_KERNELS_ROOT", raising=False)
     root = kernels_root()
     template = (root / "_template" / "kernel.metal").read_text(encoding="utf-8")
     assert "metal-kernels-template: not a kernel" in template
-    assert list_kernels() == []
+    assert list_kernels() == ["conv3x3"]
+    source = metal_source("conv3x3")
+    assert "kernel void" not in source
+    assert kernel_dir("conv3x3").name == "conv3x3"
     with pytest.raises(KernelNotFoundError):
         kernel_dir("_template")
 
 
-def test_module_main_reports_empty_registry(monkeypatch, capsys):
+def test_module_main_lists_conv3x3(monkeypatch, capsys):
     monkeypatch.delenv("METAL_KERNELS_ROOT", raising=False)
     assert main() == 0
     captured = capsys.readouterr()
-    assert "No kernels registered." in captured.out
+    assert "conv3x3" in captured.out
+    assert "No kernels registered." not in captured.out
 
 
 def test_missing_environment_root(monkeypatch):

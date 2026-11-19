@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The benchmark placeholder reports an empty registry and does not time anything."""
+"""The benchmark placeholder does not time anything."""
 
 from __future__ import annotations
 
@@ -17,4 +17,4 @@ def test_benchmark_placeholder_exits_cleanly(monkeypatch, capsys):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.main() == 0
-    assert "No kernels to benchmark." in capsys.readouterr().out
+    assert "No benchmark is implemented for: conv3x3" in capsys.readouterr().out
