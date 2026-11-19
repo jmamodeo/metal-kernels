@@ -2,7 +2,7 @@
 
 One randomly initialized SAM 3 forward pass, traced on CPU, ranked by estimated FLOPs. This is the list that decides which Metal kernels to write. Trained weights were not used.
 
-The numbers below come from `tools/sam3_inventory/output/`. Reproduce them with `tools/sam3_inventory/README.md`. The checkout is [facebookresearch/sam3](https://github.com/facebookresearch/sam3) `31cb7e624e4fe95301b1be1d4e809111593d2e45`, imported as the installed `sam3` 0.1.0 package. The run used PyTorch `2.15.0+cpu` and torchvision `0.29.2+cpu`. The image model has 840,509,750 parameters. Nothing in this document was executed on Metal, MPS, or MLX.
+The numbers below come from `tools/sam3_inventory/output/`. Reproduce them with `tools/sam3_inventory/README.md`. The checkout is [facebookresearch/sam3](https://github.com/facebookresearch/sam3) `31cb7e624e4fe95301b1be1d4e809111593d2e45`, imported as the installed `sam3` 0.1.0 package. The run used PyTorch `2.15.0+cpu` and torchvision `0.29.2+cpu`. The image model has 840,509,750 parameters. The FLOP trace itself is a CPU run. Shape timings measured on an M3 Max are in [bench/sam3_shapes/results/m3-max-2026-11-18.md](../bench/sam3_shapes/results/m3-max-2026-11-18.md).
 
 ## What was traced
 
@@ -85,7 +85,7 @@ The two MLP linears plus QKV plus the attention projection are 72.3% of the whol
 
 ## Apple silicon coverage
 
-This is a source review, not a measurement. The MPS notes are the PyTorch tag `v2.15.0` tree, the same version as the trace. The MLX notes are the 0.32.4 docs. Neither stack was executed. Every row that says an op exists still needs a Mac run at the shapes in the table above before it counts as covered for this model.
+The table below is a source review of the PyTorch tag `v2.15.0` tree, the same version as the trace, and of the MLX 0.32.4 docs. The measured run of these shapes is [m3-max-2026-11-18.md](../bench/sam3_shapes/results/m3-max-2026-11-18.md): an M3 Max, PyTorch 2.15.0 and MLX 0.32.4, with no fallbacks and no errors. Ops that are not in that file are still unchecked on a Mac.
 
 PyTorch's MPS fallback list at that tag (`aten/src/ATen/mps/MPSFallback.mm`) registers an unconditional CPU fallback only for `embedding_renorm_` and a `_slow_conv2d_forward` stub. Any other op without an MPS kernel errors unless `PYTORCH_ENABLE_MPS_FALLBACK=1`.
 
@@ -148,3 +148,4 @@ These are in the SAM 3 source at the pinned commit, or they were raised by this 
 | `tools/sam3_inventory/output/calls.json` | Every aggregated aten call |
 | `tools/sam3_inventory/output/flops_by_stage.json` | `FlopCounterMode` per module |
 | `tools/sam3_inventory/output/cuda_scan.json` | CUDA-only snippets and the frame-1 exception |
+| `bench/sam3_shapes/results/m3-max-2026-11-18.md` | M3 Max medians for the shapes above, PyTorch 2.15.0 and MLX 0.32.4 |
