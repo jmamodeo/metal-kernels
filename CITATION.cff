@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use metal-kernels, please cite it using the metadata below."
+type: software
+title: "metal-kernels"
+abstract: "Apple Metal GPU kernels with NumPy references, Python (MLX and PyTorch MPS) hosts, Swift hosts, and benchmarks, built toward running SAM 3 entirely on Metal."
+authors:
+  - family-names: "Amodeo"
+    given-names: "John"
+repository-code: "https://github.com/jmamodeo/metal-kernels"
+url: "https://github.com/jmamodeo/metal-kernels"
+license: Apache-2.0
+keywords:
+  - metal
+  - gpu
+  - apple-silicon
+  - mlx
+  - pytorch
+  - swift
+  - sam3

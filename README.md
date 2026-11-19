@@ -97,3 +97,16 @@ Copy [kernels/_template](kernels/_template/README.md) to `kernels/<name>/` and a
 Prefer one kernel per change so the reference, the shader, and the test can be reviewed together. Tests that launch Metal belong behind the `metal` marker so they skip on machines without it. Record benchmark numbers you measured; the `bench/` placeholder does not invent timings.
 
 The project is released under the Apache License 2.0. See [LICENSE](LICENSE).
+
+## Citation
+
+If you use metal-kernels in your work, cite it with the metadata in [CITATION.cff](CITATION.cff). GitHub's "Cite this repository" button generates BibTeX and APA from that file.
+
+```bibtex
+@software{amodeo_metal_kernels,
+  author = {Amodeo, John},
+  title = {metal-kernels},
+  url = {https://github.com/jmamodeo/metal-kernels},
+  license = {Apache-2.0}
+}
+```
