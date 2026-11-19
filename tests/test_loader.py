@@ -7,7 +7,6 @@ import subprocess
 import sys
 
 import pytest
-
 from metal_kernels import (
     KernelNotFoundError,
     host_is_macos,

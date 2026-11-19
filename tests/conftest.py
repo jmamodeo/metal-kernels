@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pytest
-
 from metal_kernels.platform import host_is_macos
 
 
