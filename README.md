@@ -2,7 +2,7 @@
 
 Community collection of Apple Metal GPU kernels. The long-term goal is to run Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3) entirely on Metal on Apple silicon.
 
-The kernel registry is empty. This repository is the skeleton: the shared layout, the per-kernel workflow, and Python and Swift packages that both read `kernels/`. Nothing here compiles a shader. `metal_kernels.integrations.sam3` is a load-time patch so the pinned SAM 3 checkout can run on CPU or MPS with built-in ops. `bench/sam3_shapes/` times those ops on a Mac.
+The registry lists `conv3x3`. Its `.metal` file is a comment header, and the NumPy reference is in place. This repository is the skeleton: the shared layout, the per-kernel workflow, and Python and Swift packages that both read `kernels/`. Nothing here compiles a shader. `metal_kernels.integrations.sam3` is a load-time patch so the pinned SAM 3 checkout can run on CPU or MPS with built-in ops. `bench/sam3_shapes/` times those ops on a Mac.
 
 ## Layout
 
@@ -66,7 +66,7 @@ pytest
 python -m metal_kernels
 ```
 
-`pytest` skips Metal execution tests when the host is not macOS. `python -m metal_kernels` prints the registry, which is empty.
+`pytest` skips Metal execution tests when the host is not macOS. `python -m metal_kernels` prints the registry. Today that is `conv3x3`.
 
 An editable install from a checkout is the supported way to find `kernels/`. The loader also honors `METAL_KERNELS_ROOT` when that variable points at the `kernels` directory. A non-editable wheel does not yet vendor the `.metal` sources.
 
