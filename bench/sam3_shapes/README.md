@@ -15,7 +15,7 @@ pip install -e "python[mac]"
 python bench/sam3_shapes/profile.py
 ```
 
-`python[mac]` installs PyTorch and MLX. Use the default pip index. The CPU-only PyTorch index has no MPS backend.
+`python[mac]` installs PyTorch, MLX, and NumPy. PyTorch warns `Failed to initialize NumPy` when NumPy is absent, and the profiler needs it. Use the default pip index. The CPU-only PyTorch index has no MPS backend.
 
 That command writes:
 
