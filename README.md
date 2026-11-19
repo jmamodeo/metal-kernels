@@ -1,8 +1,10 @@
 # metal-kernels
 
-Community collection of Apple Metal GPU kernels. The long-term goal is to run Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3) entirely on Metal on Apple silicon.
+A community collection of Apple Metal GPU kernels for Apple silicon. Each kernel ships with a NumPy reference that defines the math, Python bindings through MLX and PyTorch MPS, a native Swift host, and benchmarks against the built-in framework op.
 
-The registry lists `conv3x3`. Its `.metal` file is a comment header, and the NumPy reference is in place. This repository is the skeleton: the shared layout, the per-kernel workflow, and Python and Swift packages that both read `kernels/`. Nothing here compiles a shader. `metal_kernels.integrations.sam3` is a load-time patch so the pinned SAM 3 checkout can run on CPU or MPS with built-in ops. `bench/sam3_shapes/` times those ops on a Mac.
+Kernels are chosen by profiling real models and writing a custom kernel only where the built-in Metal ops fall short. The first workload profiled is Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3). Its integration and shape benchmarks live in `metal_kernels.integrations.sam3` and `bench/sam3_shapes/`.
+
+The registry lists `conv3x3`. Its NumPy reference is in place and its `.metal` file is still a comment header.
 
 ## Layout
 
@@ -15,7 +17,7 @@ swift/                     Swift sources and tests
 reference/                 NumPy oracles
 tests/                     pytest
 bench/                     benchmark scripts
-docs/ROADMAP.md            SAM 3 goal, workflow, op inventory
+docs/ROADMAP.md            goal, workflow, kernel status, workloads
 ```
 
 The `.metal` file in `kernels/<name>/` is the only copy of that kernel. Python and Swift load that file. Kernel directories whose names start with `_` are ignored, so `_template` is never registered.
@@ -24,7 +26,7 @@ The `.metal` file in `kernels/<name>/` is the only copy of that kernel. Python a
 
 ## Workflow
 
-Each kernel follows the same four steps. [docs/ROADMAP.md](docs/ROADMAP.md) has the longer version and the SAM 3 notes.
+Each kernel follows the same four steps. [docs/ROADMAP.md](docs/ROADMAP.md) has the longer version and the status of each kernel.
 
 1. **NumPy reference** in `reference/<name>.py`. This is the math, and it is the oracle the tests check against.
 2. **Metal kernel** in `kernels/<name>/<name>.metal`, called from Python through MLX (`mx.fast.metal_kernel`) and/or PyTorch MPS (`torch.mps.compile_shader`), and checked against the reference on Apple silicon.
@@ -35,7 +37,7 @@ Write the reference and the Python check before the Swift host. The Swift packag
 
 ## Install
 
-Installing these packages does not download SAM 3 weights and does not run the model. The commands below are the install paths now, and they stay the same once kernels exist.
+Installing these packages does not download any model weights. The commands below are the install paths now, and they stay the same once kernels exist.
 
 ### Python
 
