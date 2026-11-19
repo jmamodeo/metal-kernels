@@ -94,6 +94,8 @@ SwiftPM prints `Found unhandled resource at <repo>/kernels` while doing this. Th
 
 ## Contributing
 
+Every merge into main needs John Amodeo's OK, and John is the sole commit author/committer (no co-author trailers).
+
 Copy [kernels/_template](kernels/_template/README.md) to `kernels/<name>/` and add the NumPy reference, the test, and the hosts described there. Keep the shader in `kernels/` only.
 
 Prefer one kernel per change so the reference, the shader, and the test can be reviewed together. Tests that launch Metal belong behind the `metal` marker so they skip on machines without it. Record benchmark numbers you measured; the `bench/` placeholder does not invent timings.
