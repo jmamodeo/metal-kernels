@@ -2,7 +2,7 @@
 
 Python package for the metal-kernels collection. See the [repository README](../README.md) for the goal, the per-kernel workflow, and install instructions.
 
-Kernel sources live in `../kernels`. That `.metal` file is the only copy. This package locates the file and returns its text. It does not compile or launch kernels, and importing `metal_kernels` does not import MLX or PyTorch.
+Kernel sources live in `../kernels`. That `.metal` file is the only copy. Importing `metal_kernels` returns that text and does not import MLX or PyTorch. `metal_kernels.conv3x3` compiles `kernels/conv3x3/conv3x3.metal` on first launch, through MLX or PyTorch MPS.
 
 ## SAM 3 on MPS
 

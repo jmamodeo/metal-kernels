@@ -4,7 +4,7 @@ A community collection of Apple Metal GPU kernels for Apple silicon. Each kernel
 
 Kernels are chosen by profiling real models and writing a custom kernel only where the built-in Metal ops fall short. The first workload profiled is Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3). Its integration and shape benchmarks live in `metal_kernels.integrations.sam3` and `bench/sam3_shapes/`.
 
-The registry lists `conv3x3`. Its NumPy reference is in place and its `.metal` file is still a comment header.
+The registry lists `conv3x3`. Its NumPy reference is in place, and its Metal shader is called from Python through MLX and PyTorch MPS. Swift is not started. The Mac benchmark numbers are not recorded yet.
 
 ## Layout
 
@@ -59,7 +59,7 @@ The base package has no required dependencies. `pip install -e .` inside `python
 | `mlx` | MLX | Apple silicon, once a kernel calls `mx.fast.metal_kernel` |
 | `torch` | PyTorch | once a kernel calls `torch.mps.compile_shader` |
 
-MLX wheels and the PyTorch MPS backend are macOS only. They are unused today, and they are not installed by the base package or the `dev` extra.
+MLX wheels and the PyTorch MPS backend are macOS only. `metal_kernels.conv3x3` imports them when it launches. They are not installed by the base package or the `dev` extra.
 
 Then, from the repository root:
 
@@ -93,6 +93,8 @@ There is no version tag yet.
 SwiftPM prints `Found unhandled resource at <repo>/kernels` while doing this. The resource lives outside the Swift target directory, which is what that line reports, and the directory is still bundled.
 
 ## Contributing
+
+Every merge into main needs John Amodeo's OK, and John is the sole commit author/committer (no co-author trailers).
 
 Copy [kernels/_template](kernels/_template/README.md) to `kernels/<name>/` and add the NumPy reference, the test, and the hosts described there. Keep the shader in `kernels/` only.
 

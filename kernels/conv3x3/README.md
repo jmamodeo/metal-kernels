@@ -1,6 +1,6 @@
 # conv3x3
 
-3×3 convolution used by the SAM 3 FPN neck and the mask-head pixel decoder. Step 1 is the NumPy reference. The shader in this directory is a comment header only.
+3×3 convolution used by the SAM 3 FPN neck and the mask-head pixel decoder. Step 1, the NumPy reference, is done. Step 2, the Metal kernel called from Python, is in progress: the shader and both hosts are written, and the Mac timings are not filled in yet.
 
 SAM 3 commit `31cb7e624e4fe95301b1be1d4e809111593d2e45`:
 
@@ -36,21 +36,37 @@ Padding is 1 on each spatial edge, so the output height and width match the inpu
 
 ## Threadgroup assumptions
 
-- Grid size: not started
-- Threadgroup size: not started
-- Threadgroup memory: not started
-- Layout the kernel assumes (contiguous dimensions, vector width): not started
-- Edge behavior (bounds checks, tail elements): not started
+The launch is `dispatchThreads`. `threads` is the total number of threads, not the number of groups.
+
+- Grid size: `(ceil(W / 8) * 8, ceil(H / 8) * 8, N * ceil(Cout / 4))`
+- Threadgroup size: `(8, 8, 1)`. One thread per output pixel in an 8×8 tile. Each thread accumulates 4 output channels.
+- Threadgroup memory: one `float` tile of `(8 + 2) * (8 + 2) = 100` values, 400 bytes. That is the input window for the current input channel, including the 1-pixel halo. It is overwritten for every input channel. Nothing like the 729 MiB im2col matrix is allocated.
+- Layout the kernel assumes: C-contiguous NCHW input, OIHW weight, a contiguous bias vector, all float32. No vector loads.
+- Edge behavior: the grid is rounded up to a whole 8×8 tile. Threads past `H` or `W` still load and hit both barriers, and they do not write. Samples outside the image are zeros.
+
+At `[1, 256, 288, 288]` the grid is `(288, 288, 64)` because 288 is divisible by 8 and 256 output channels are 64 blocks of 4.
 
 ## Numerical check
 
 - Reference: `reference/conv3x3.py` (`conv3x3_naive` and `conv3x3_im2col`)
-- Tolerance, per dtype: float32, `rtol=1e-4`, `atol=1e-4` against the other NumPy implementation and against `torch.nn.functional.conv2d` on CPU when PyTorch is installed
-- Shapes covered by the test: `H=W=1`, `5`, and `7`, including `Cin != Cout`; the im2col path also runs at `[1, 256, 288, 288]`
+- Tolerance, per dtype: float32, `rtol=1e-4`, `atol=1e-4` for the shapes in `tests/test_conv3x3_metal.py`. The NumPy tests also use that tolerance against CPU `conv2d`, including the full `[1, 256, 288, 288]` im2col path.
+- Shapes covered by the Metal test: `H=W=1`, `5`, `7`, and `8`; `9×10`; `Cin != Cout`; batch 2. The full SAM 3 shape is what `bench/conv3x3.py` times, not what the pytest launches.
+- Measured on John's M3 Max: not yet. Run `python bench/conv3x3.py` and record the milliseconds here.
+
+## Run on a Mac
+
+From the repository root, with the `mac` extra installed:
+
+```bash
+pytest tests/test_conv3x3_metal.py
+python bench/conv3x3.py
+```
+
+`pytest` without a Mac still runs the launch-geometry checks in that file. The tests that launch the shader are marked `metal` and skip.
 
 ## Hosts
 
-- Python (MLX): not started
-- Python (PyTorch MPS): not started
+- Python (MLX): `metal_kernels.conv3x3.conv3x3` via `mx.fast.metal_kernel`. The `.metal` file is the header; the body calls `conv3x3_thread`.
+- Python (PyTorch MPS): the same function, via `torch.mps.compile_shader` on `kernel void conv3x3`.
 - Swift: not started
-- Benchmark against the built-in op: not started
+- Benchmark against the built-in op: `bench/conv3x3.py` is written. Numbers are not recorded yet.
