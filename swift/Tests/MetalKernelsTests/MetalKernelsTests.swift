@@ -21,9 +21,11 @@ final class MetalKernelsTests: XCTestCase {
         XCTAssertTrue(text.contains("metal-kernels-template: not a kernel"))
     }
 
-    func testRegistryIsEmpty() throws {
+    func testRegistryListsFlashAttentionHd32() throws {
         unsetenv("METAL_KERNELS_ROOT")
-        XCTAssertEqual(try MetalKernels.kernelNames(), [])
+        XCTAssertEqual(try MetalKernels.kernelNames(), ["flash_attention_hd32"])
+        let source = try MetalKernels.metalSource(named: "flash_attention_hd32")
+        XCTAssertTrue(source.contains("kernel void flash_attention_hd32("))
     }
 
     func testTemplateIsNotAKernel() {

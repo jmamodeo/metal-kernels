@@ -33,18 +33,25 @@ def test_host_flag_matches_platform():
     assert host_is_macos() is (sys.platform == "darwin")
 
 
-def test_checkout_registers_no_kernels_yet(monkeypatch):
+def test_checkout_registers_flash_attention_hd32(monkeypatch):
     monkeypatch.delenv("METAL_KERNELS_ROOT", raising=False)
     root = kernels_root()
     template = (root / "_template" / "kernel.metal").read_text(encoding="utf-8")
     assert "metal-kernels-template: not a kernel" in template
-    assert list_kernels() == []
+    assert list_kernels() == ["flash_attention_hd32"]
     with pytest.raises(KernelNotFoundError):
         kernel_dir("_template")
 
 
-def test_module_main_reports_empty_registry(monkeypatch, capsys):
+def test_module_main_lists_registry(monkeypatch, capsys):
     monkeypatch.delenv("METAL_KERNELS_ROOT", raising=False)
+    assert main() == 0
+    captured = capsys.readouterr()
+    assert "flash_attention_hd32" in captured.out.splitlines()
+
+
+def test_module_main_reports_empty_registry(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("METAL_KERNELS_ROOT", str(tmp_path))
     assert main() == 0
     captured = capsys.readouterr()
     assert "No kernels registered." in captured.out
