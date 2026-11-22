@@ -43,10 +43,8 @@ def render(records: list[dict]) -> str:
             record["recorded_at"][:10],
             record["commit"] + (" (dirty)" if record["dirty"] else ""),
             record["design"],
-            (f"{mlx['median_ms']:.3f}" + ("" if passed["mlx"] else " (failed)"))
-            if mlx else "—",
-            (f"{mps['median_ms']:.3f}" + ("" if passed["mps"] else " (failed)"))
-            if mps else "—",
+            (f"{mlx['median_ms']:.3f}" + ("" if passed["mlx"] else " (failed)")) if mlx else "—",
+            (f"{mps['median_ms']:.3f}" + ("" if passed["mps"] else " (failed)")) if mps else "—",
             f"{max(valid):.2f}" if valid else "—",
             speedups,
         ]

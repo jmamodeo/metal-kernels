@@ -45,7 +45,8 @@ def inputs():
 def test_record_fields_and_append(tmp_path, monkeypatch, inputs):
     monkeypatch.setattr(record, "_git", lambda: ("abc123", True))
     monkeypatch.setattr(
-        record, "_machine",
+        record,
+        "_machine",
         lambda: {"chip": "M3 Max", "macos": "15", "python": "3", "torch": "2", "mlx": "1"},
     )
     first = record.append_record("attention", directory=tmp_path, **inputs)
@@ -62,9 +63,15 @@ def test_record_fields_and_append(tmp_path, monkeypatch, inputs):
     assert first["correctness"] == inputs["correctness"]
     kernel = first["variants"]["mlx"]["kernel"]
     assert kernel == {
-        "median_ms": 2.0, "min_ms": 1.0, "p10_ms": 1.2, "p90_ms": 2.8,
-        "iterations": 3, "bytes_per_call": 2_000_000, "tflops": 1.0,
-        "gb_per_s": 1.0, "speedup": 3.0,
+        "median_ms": 2.0,
+        "min_ms": 1.0,
+        "p10_ms": 1.2,
+        "p90_ms": 2.8,
+        "iterations": 3,
+        "bytes_per_call": 2_000_000,
+        "tflops": 1.0,
+        "gb_per_s": 1.0,
+        "speedup": 3.0,
     }
     assert first["variants"]["mlx"]["builtin"]["gb_per_s"] == pytest.approx(2 / 3)
 
@@ -112,8 +119,20 @@ def test_record_flag_appends(tmp_path, monkeypatch, inputs):
 def test_git_captures_clean_and_dirty(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     subprocess.run(
-        ["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-         "commit", "-q", "--allow-empty", "-m", "test"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "test",
+        ],
         check=True,
     )
     monkeypatch.setattr(record, "REPO", tmp_path)
@@ -152,11 +171,13 @@ def test_nonfinite_failure_and_dirty_marker(tmp_path, monkeypatch, inputs):
     monkeypatch.setattr(record, "_git", lambda: ("abc123", True))
     inputs["correctness"]["mlx"]["passed"] = False
     inputs["correctness"]["mlx"]["reference"] = {
-        "max_abs_error": float("inf"), "mean_abs_error": float("nan")
+        "max_abs_error": float("inf"),
+        "mean_abs_error": float("nan"),
     }
     data = record.append_record("attention", directory=tmp_path, **inputs)
     assert data["correctness"]["mlx"]["reference"] == {
-        "max_abs_error": "Infinity", "mean_abs_error": "NaN"
+        "max_abs_error": "Infinity",
+        "mean_abs_error": "NaN",
     }
     assert json.loads((tmp_path / "attention.jsonl").read_text()) == data
     assert "abc123 (dirty)" in results_table.render([data])

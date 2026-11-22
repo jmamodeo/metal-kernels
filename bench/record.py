@@ -59,9 +59,7 @@ def _machine() -> dict:
 
 
 def _git() -> tuple[str, bool]:
-    commit = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=REPO, text=True
-    ).strip()
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
     status = subprocess.check_output(
         ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=REPO, text=True
     )
