@@ -2,7 +2,7 @@
 """Time PyTorch MPS and MLX built-ins at the SAM 3 shapes from the op inventory.
 
 This script is meant to be run on an Apple silicon Mac. It does not time
-anything on this repository's Linux CI in a way that should be read as an
+anything on Linux in a way that should be read as an
 MPS result. ``--self-check`` runs one tiny linear on the CPU so the script
 can be exercised where MPS is absent.
 
