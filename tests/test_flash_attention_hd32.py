@@ -18,6 +18,8 @@ import pytest
 from metal_kernels import list_kernels, metal_source
 from metal_kernels.flash_attention import (
     KERNEL_NAME,
+    QUERY_BLOCK,
+    THREADGROUP_MEMORY_BYTES,
     THREADGROUP_SIZE,
     bias_strides,
     flash_attention_hd32,
@@ -52,7 +54,19 @@ def test_kernel_is_registered(monkeypatch):
     assert '[[host_name("flash_attention_hd32_" #NAME)]]' in source
     assert "FA_HD32_INSTANTIATE(bfloat, ushort)" in source
     assert "FA_HD32_INSTANTIATE(float, float)" in source
-    assert "inline void flash_attention_hd32_row(" in source
+    assert "inline void flash_attention_hd32_block(" in source
+    assert "constant constexpr uint FA_HD32_BLOCK_Q = 32;" in source
+    assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
+
+
+def test_launch_constants_match_the_shader():
+    # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. K and
+    # V go straight to registers, so no threadgroup memory.
+    assert (QUERY_BLOCK, THREADGROUP_SIZE) == (32, 128)
+    assert THREADGROUP_MEMORY_BYTES == 0
+    source = metal_source(KERNEL_NAME)
+    assert "threadgroup float" not in source
+    assert "threadgroup_barrier" not in source
 
 
 def test_import_does_not_load_gpu_frameworks():
@@ -78,10 +92,12 @@ def test_backend_is_keyword_only():
 @pytest.mark.parametrize(
     ("shape", "expected"),
     [
-        ((1, 1, 1, 1), ((1, 1, 1, 1), 32, 32)),
-        ((1, 2, 5, 7), ((10, 2, 5, 7), 320, 256)),
-        (SAM3_ENCODER, ((41472, 8, 5184, 5184), 41472 * 32, THREADGROUP_SIZE)),
-        (SAM3_CROSS, ((1608, 8, 201, 5184), 1608 * 32, THREADGROUP_SIZE)),
+        ((1, 1, 1, 1), ((1, 1, 1, 1), 128, 128)),
+        ((1, 2, 5, 7), ((10, 2, 5, 7), 256, 128)),
+        ((2, 3, 17, 33), ((102, 3, 17, 33), 6 * 128, 128)),
+        ((1, 2, 50, 7), ((100, 2, 50, 7), 2 * 2 * 128, 128)),
+        (SAM3_ENCODER, ((41472, 8, 5184, 5184), 8 * 162 * 128, THREADGROUP_SIZE)),
+        (SAM3_CROSS, ((1608, 8, 201, 5184), 8 * 7 * 128, THREADGROUP_SIZE)),
     ],
 )
 def test_launch_geometry(shape, expected):
@@ -90,7 +106,7 @@ def test_launch_geometry(shape, expected):
     kv_shape = (batch, heads, key_length, 32)
     dims, threads, threadgroup = launch_geometry(q_shape, kv_shape, kv_shape)
     assert (dims, threads, threadgroup) == expected
-    assert threads % 32 == 0 and threadgroup % 32 == 0
+    assert threads % threadgroup == 0 and threadgroup % 32 == 0
 
 
 def test_launch_geometry_rejects_bad_shapes():
@@ -112,6 +128,9 @@ def test_launch_geometry_rejects_bad_shapes():
         launch_geometry(q, (1, 2, 0, 32), (1, 2, 0, 32))
     with pytest.raises(ValueError, match="at most"):
         launch_geometry((1, 1, 2**26, 32), (1, 1, 1, 32), (1, 1, 1, 32))
+    # One query per head still launches a full 64-thread group.
+    with pytest.raises(ValueError, match="at most"):
+        launch_geometry((2**25, 1, 1, 32), (2**25, 1, 1, 32), (2**25, 1, 1, 32))
 
 
 @pytest.mark.parametrize(
@@ -229,6 +248,16 @@ def _check(run, arrays, dtype, scale=None):
     return actual, rounded, expected
 
 
+# Query tail: 50 is not a multiple of the 32-row query block. Key tail:
+# 5184 + 17 is not a multiple of the 64-key block.
+TAIL_QUERY_LENGTH = 50
+TAIL_KEY_LENGTH = 5184 + 17
+TAIL_SHAPES = [
+    (1, 2, TAIL_QUERY_LENGTH, 64),
+    (1, 2, 32, TAIL_KEY_LENGTH),
+    (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH),
+]
+
 _HOSTS = [pytest.param(_run_mlx, id="mlx"), pytest.param(_run_mps, id="mps")]
 _DTYPES = ["bfloat16", "float32"]
 
@@ -240,6 +269,43 @@ _DTYPES = ["bfloat16", "float32"]
 def test_matches_reference_small(run, dtype, shape):
     q, k, v, _ = _random_inputs(shape, seed=sum(shape))
     _check(run, [q, k, v, None], dtype)
+
+
+@pytest.mark.metal
+@pytest.mark.parametrize("run", _HOSTS)
+@pytest.mark.parametrize("dtype", _DTYPES)
+@pytest.mark.parametrize("shape", TAIL_SHAPES, ids=["query-tail", "key-tail", "both-tails"])
+def test_matches_reference_tail_blocks(run, dtype, shape):
+    q, k, v, _ = _random_inputs(shape, seed=sum(shape))
+    _check(run, [q, k, v, None], dtype)
+
+
+@pytest.mark.metal
+@pytest.mark.parametrize("run", _HOSTS)
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_matches_reference_tail_blocks_with_bias(run, dtype):
+    shape = (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH)
+    q, k, v, bias = _random_inputs(shape, seed=13, bias_shape=shape)
+    bias.flat[::3] = -np.inf
+    _check(run, [q, k, v, bias], dtype)
+
+
+@pytest.mark.metal
+@pytest.mark.parametrize("run", _HOSTS)
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_fully_masked_rows_in_partial_query_block_are_zero(run, dtype):
+    # Rows 32 to 49 form the partial last query block of Lq = 50, and rows 48
+    # and 49 the partial last simdgroup inside it.
+    shape = (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH)
+    q, k, v, bias = _random_inputs(shape, seed=14, bias_shape=shape)
+    bias[0, 0, 49, :] = -np.inf
+    bias[0, 1, 48, :] = -np.inf
+    bias[0, 1, 49, : TAIL_KEY_LENGTH // 2] = -np.inf
+    actual, _, _ = _check(run, [q, k, v, bias], dtype)
+    np.testing.assert_array_equal(actual[0, 0, 49], 0)
+    np.testing.assert_array_equal(actual[0, 1, 48], 0)
+    assert np.any(actual[0, 0, 48] != 0)
+    assert np.any(actual[0, 1, 49] != 0)
 
 
 @pytest.mark.metal

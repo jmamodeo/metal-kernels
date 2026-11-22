@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from bench import record
+
 _REPO = Path(__file__).resolve().parents[1]
 
 
@@ -32,6 +34,25 @@ def test_benchmark_placeholder_with_no_kernels(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("METAL_KERNELS_ROOT", str(tmp_path))
     assert _load_bench_run().main() == 0
     assert "No kernels to benchmark." in capsys.readouterr().out
+
+
+def test_benchmark_index_points_at_existing_scripts(monkeypatch, capsys):
+    monkeypatch.delenv("METAL_KERNELS_ROOT", raising=False)
+    assert _load_bench_run().main() == 0
+    out = capsys.readouterr().out
+    assert "flash_attention_hd32: python bench/flash_attention_hd32.py" in out
+    assert "without a benchmark script" not in out
+
+
+def test_benchmark_index_lists_kernels_without_a_script(tmp_path, monkeypatch, capsys):
+    kernel = tmp_path / "no_bench_yet"
+    kernel.mkdir(parents=True)
+    (kernel / "no_bench_yet.metal").write_text("")
+    monkeypatch.setenv("METAL_KERNELS_ROOT", str(tmp_path))
+    assert _load_bench_run().main() == 0
+    out = capsys.readouterr().out
+    assert "Kernels without a benchmark script yet: no_bench_yet" in out
+    assert "python bench/no_bench_yet.py" not in out
 
 
 def _load_flash_attention_bench():
@@ -70,6 +91,8 @@ def test_flash_attention_bench_summary():
     bench = _load_flash_attention_bench()
     stats = bench.summarize([4.0, 1.0, 3.0, 2.0, 5.0], flops=2_000_000_000)
     assert stats == {"median_ms": 3.0, "p10_ms": 1.4, "p90_ms": 4.6, "tflops": 2e9 / 3e9}
+    assert bench.percentile is record.percentile
+    assert record.percentile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1) == pytest.approx(1.4)
 
 
 def test_flash_attention_bench_record_arguments(capsys):

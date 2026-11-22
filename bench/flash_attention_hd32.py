@@ -17,7 +17,7 @@ Results are appended through ``bench/record.py`` only with ``--record``.
 Run on Apple silicon from the repository root:
 
     python bench/flash_attention_hd32.py
-    python bench/flash_attention_hd32.py --record --version v0 --design "TEXT"
+    python bench/flash_attention_hd32.py --record --version v1 --design "TEXT"
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ for _path in (_REPO / "python" / "src", _REPO):
         sys.path.insert(0, str(_path))
 
 from bench.record import (  # noqa: E402
-    _percentile,
     add_record_arguments,
+    percentile,
     record_if_requested,
     validate_record_arguments,
 )
@@ -70,8 +70,8 @@ def summarize(samples: list[float], flops: int) -> dict:
     median = statistics.median(values)
     return {
         "median_ms": median,
-        "p10_ms": _percentile(values, 0.1),
-        "p90_ms": _percentile(values, 0.9),
+        "p10_ms": percentile(values, 0.1),
+        "p90_ms": percentile(values, 0.9),
         "tflops": flops / (median * 1e9),
     }
 
@@ -137,7 +137,13 @@ def main(argv: list[str] | None = None) -> int:
     import numpy as np
     import torch
     import torch.nn.functional as functional
-    from metal_kernels.flash_attention import flash_attention_hd32, launch_geometry
+    from metal_kernels.flash_attention import (
+        KEY_BLOCK,
+        QUERY_BLOCK,
+        THREADGROUP_MEMORY_BYTES,
+        flash_attention_hd32,
+        launch_geometry,
+    )
 
     if not torch.backends.mps.is_available():
         print("PyTorch MPS is not available.", file=sys.stderr)
@@ -265,8 +271,13 @@ def main(argv: list[str] | None = None) -> int:
         launch_config={
             "threads": threads,
             "threadgroup": threadgroup,
-            "rows_per_simdgroup": 1,
-            "threadgroup_memory_bytes": 0,
+            "query_block": QUERY_BLOCK,
+            "key_block": KEY_BLOCK,
+            "rows_per_simdgroup": 8,
+            "threadgroup_memory_bytes": THREADGROUP_MEMORY_BYTES,
+            "kv_load": "device to registers",
+            "mma_inputs": "bf16 Q, K, V; fp32 P",
+            "mma_accumulator": "fp32",
         },
     )
     if record is not None:

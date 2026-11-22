@@ -4,9 +4,9 @@ Fused scaled dot-product attention for head dim 32, written for the SAM 3 detect
 
 ## Status
 
-Version 0: a simple per-row online-softmax kernel with MLX and PyTorch MPS launchers. Its job is to show that the bf16 and fp32 bindings, the bias path and both launch paths are correct. It has no speed target. Version 1, the tiled `simdgroup_matrix` kernel from the design note, replaces the shader body later and keeps this interface.
+Version 1: the tiled `simdgroup_matrix` kernel from the design note. It replaces the v0 per-row shader body and keeps the v0 interface: the same Python API, buffers, `dims` layout, bias semantics and tolerances. Target: an MLX-path median under 8.60 ms at `[1, 8, 5184, 32]` bf16 and a speedup above 1 against MLX SDPA in the same record; goal about 6 ms.
 
-The `metal` tests have not been run on the M3 Max for v0 yet, and no v0 benchmark run is recorded. `bench/run_mac.sh v0` does both.
+Version 0, the per-row online-softmax kernel (one simdgroup per query row), passed the `metal` tests on the M3 Max. The first v1 revision (16-row threadgroups, K/V staged as fp32 in 16 KB of threadgroup memory, fp32 GEMMs) passed the `metal` tests on the M3 Max but ran at 40.0 ms against MLX SDPA's 8.40 ms. The current revision removes the threadgroup staging, doubles the query block and feeds bf16 tiles to the GEMMs; on the M3 Max it passes the `metal` tests and runs at a 4.12 ms MLX-path median against MLX SDPA's 8.41 ms in the same record (2.04×), with error equal to MPS SDPA's. `bench/run_mac.sh v1` tests, benchmarks and records it.
 
 ## What it computes
 
@@ -33,13 +33,16 @@ The bias is optional and additive, and is added after scaling. A `-inf` bias mas
 
 ## Threadgroup assumptions
 
-- Grid size: 1-D, `batch · heads · query_length · 32` threads. One simdgroup per query row.
-- Threadgroup size: `min(256, grid)`. It must be a multiple of 32 so each simdgroup maps to one row.
-- Threadgroup memory: none.
-- Layout: row-major contiguous `(…, sequence, 32)`. Lane `i` of a simdgroup owns head-dim column `i`, so each K/V row is one 64-byte (bf16) or 128-byte (fp32) load per simdgroup.
-- Edge behavior: none needed. Every thread in the grid is a valid `(row, column)`, and any key length works, including tails that are not a multiple of 64. A row guard is kept for safety. Each tensor is limited to fewer than 2³¹ elements because offsets are 32-bit.
-- Math: bf16 is widened to fp32 by bit placement. Dot products use `simd_sum`. The scale and bias are folded into `log2(e)` so softmax uses `exp2`. `-inf` is detected from the bits, so fast math cannot fold the test away, and no infinity is used in arithmetic. O is rescaled only when the max rises.
-- Entry points: PyTorch MPS calls `flash_attention_hd32_bfloat` or `flash_attention_hd32_float`. MLX passes this file as `header` and calls `flash_attention_hd32_row` from its generated kernel body.
+- Block sizes: `FA_HD32_BLOCK_Q = 32` query rows per threadgroup, `FA_HD32_BLOCK_K = 64` keys per block, 8 rows per simdgroup. They are `constexpr` in the shader and mirrored by `QUERY_BLOCK`, `KEY_BLOCK` and `THREADGROUP_SIZE` in `metal_kernels.flash_attention`.
+- Grid size: 1-D, `batch · heads · ceil(query_length / 32) · 128` threads. One threadgroup per (batch · head, 32-query block): 1296 threadgroups at `[1, 8, 5184, 32]`.
+- Threadgroup size: exactly 128 threads (`FA_HD32_THREADS`), four simdgroups. Simdgroup `s` owns query rows `[8s, 8s + 8)` of the block. Simdgroups are independent; one whose rows are all past `query_length` returns at once.
+- Threadgroup memory: none, and no barriers. Like metal-flash-attention on Apple9, each lane loads its K and V tile elements straight from device memory into registers. The simdgroups of a threadgroup read the same K/V block at about the same time, so the repeats hit the cache.
+- Tiles: 8×8 `simdgroup_matrix`. For bf16 the GEMM inputs Q, K and V are `bfloat` tiles when the compiler defines `__HAVE_BFLOAT__` (Metal 3.1); otherwise bf16 is widened to fp32 tiles. fp32 inputs use fp32 tiles. S, P and the O accumulator are fp32, so P is never rounded. Q and O stay in registers as four tiles each across D = 32. Per 64-key block, `S = Q · Kᵀ` is eight tiles, then `O += P · V`. The row max and sum use `simd_shuffle_xor` with lane masks 1 and 8, which relies on the Apple 8×8 lane layout that metal-flash-attention and MLX also use (`fa_hd32_tile_coord`).
+- Loads: the head dimension is split as `d = 4i + t` across the four tiles `t`. Both GEMMs use the same split, so the result is unchanged. Each lane's Q, V and O elements become 8 contiguous values and its Kᵀ elements become 4 contiguous values per key, so every load is a 4-element vector load and O is written directly to device memory.
+- Layout: row-major contiguous `(…, sequence, 32)`. Each K/V block is one contiguous span, loaded by the 64 threads with consecutive addresses.
+- Edge behavior: any query length and any key length work. Keys past `key_length` in the last block are not read (their K and V are zero in registers) and get `p = 0`; query rows past `query_length` in the last block compute on zeros, never read the bias and are not stored. Each tensor is limited to fewer than 2³¹ elements because offsets are 32-bit.
+- Math: bf16 bits are reinterpreted as `bfloat`, or widened to fp32 by bit placement. The scale (applied to S in fp32) and bias are folded into `log2(e)` so softmax uses `exp2`. `-inf` is detected from the bits, so fast math cannot fold the test away, and no infinity is used in arithmetic: the running max starts at the finite `-FLT_MAX`, masked keys are excluded with a per-element flag rather than a sentinel score, and the rescale exponent is clamped to `-FLT_MAX`. O and the running sum are multiplied by `exp2(m_old − m_new)` every block, which is exactly 1 when the max does not rise.
+- Entry points: PyTorch MPS calls `flash_attention_hd32_bfloat` or `flash_attention_hd32_float`. MLX passes this file as `header` and calls `flash_attention_hd32_block` from its generated kernel body.
 
 ## Numerical check
 
@@ -49,6 +52,7 @@ The bias is optional and additive, and is added after scaling. A `-inf` bias mas
   - `(B, H, Lq, Lk)` = `(1, 1, 1, 1)`, `(1, 2, 5, 7)`, `(2, 3, 17, 33)`, `(1, 8, 64, 64)`, `(1, 2, 9, 100)` and `(1, 2, 9, 1000)`
   - bias that is full, per key, per (query, key), per (batch, query) and a scalar, at `Lk` = 7, 100 and 1000, with every third bias element `-inf`
   - fully `-inf`-masked rows, which must be exactly zero
+  - tail blocks: `Lq = 50` (not a multiple of 32) and `Lk = 5184 + 17` (not a multiple of 64), alone and together, with a full bias, and with fully `-inf`-masked rows inside the partial last query block
   - an explicit scale, large scores and a single key
   - bf16 only: the encoder shape `(1, 8, 5184, 5184)`, and the decoder cross-attention shape `(1, 8, 201, 5184)` with and without a full bias
 

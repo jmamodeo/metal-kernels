@@ -1,24 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
-// FlashAttention for head dim 32, version 0.
+// FlashAttention for head dim 32, version 1.
 //
 // softmax(Q Kᵀ * scale + bias) V with an online softmax, so the score matrix
-// is never written to memory. One simdgroup owns one query row and each of
-// its 32 lanes owns one of the 32 head-dim columns. Q, K, V, bias and O share
-// one dtype, bf16 or fp32. All arithmetic is fp32; a bf16 O is rounded once
-// at the end.
+// is never written to memory. One threadgroup of four simdgroups owns 32
+// query rows of one (batch, head); each simdgroup owns 8 rows and runs both
+// GEMMs on 8x8 simdgroup_matrix tiles with fp32 accumulators. K and V are
+// walked in blocks of 64 keys, loaded by each lane straight from device
+// memory in the input dtype; there is no threadgroup memory. Q, K, V, bias
+// and O share one dtype, bf16 or fp32. Softmax and accumulation are fp32; a
+// bf16 O is rounded once at the end.
 //
 // This file is the only copy of the shader. Both hosts compile this text:
 // - PyTorch MPS (torch.mps.compile_shader) calls `flash_attention_hd32_bfloat`
 //   or `flash_attention_hd32_float` below.
 // - MLX (mx.fast.metal_kernel) passes this file as `header` and calls
-//   `flash_attention_hd32_row` from the generated kernel body.
+//   `flash_attention_hd32_block` from the generated kernel body.
 //
 // See kernels/flash_attention_hd32/README.md for shapes and launch geometry.
 
 #include <metal_stdlib>
 using namespace metal;
 
+#define FA_HD32_UNROLL _Pragma("clang loop unroll(full)")
+
 constant constexpr uint FA_HD32_HEAD_DIM = 32;
+constant constexpr uint FA_HD32_SIMD_WIDTH = 32;
+constant constexpr uint FA_HD32_TILE = 8;      // simdgroup_matrix side
+constant constexpr uint FA_HD32_BLOCK_Q = 32;  // query rows per threadgroup
+constant constexpr uint FA_HD32_BLOCK_K = 64;  // keys per K/V block
+constant constexpr uint FA_HD32_D_TILES = FA_HD32_HEAD_DIM / FA_HD32_TILE;
+constant constexpr uint FA_HD32_K_TILES = FA_HD32_BLOCK_K / FA_HD32_TILE;
+constant constexpr uint FA_HD32_THREADS = FA_HD32_BLOCK_Q / FA_HD32_TILE * FA_HD32_SIMD_WIDTH;
 constant constexpr uint FA_HD32_NEG_INF_BITS = 0xFF800000u;
 constant constexpr uint FA_HD32_NEG_FLT_MAX_BITS = 0xFF7FFFFFu;
 
@@ -135,88 +147,274 @@ inline FaHd32Params fa_hd32_params(Dims dims, float scale) {
     return params;
 }
 
-// Computes one output element: row `thread_id / 32`, column `thread_id % 32`.
+// (column, row) of the two elements a lane holds in an 8x8 simdgroup
+// matrix: thread_elements()[e] is element (row, column + e). This is the
+// Apple GPU layout that metal-flash-attention (`morton_order`) and MLX
+// (steel `BaseMMAFrag`) also rely on. The four lanes that share a row differ
+// in lane bits 0 and 3, so row reductions use simd_shuffle_xor with 1 and 8.
+inline ushort2 fa_hd32_tile_coord(ushort lane) {
+    const ushort quad = lane / 4;
+    const ushort row = (quad & 4) + (lane / 2) % 4;
+    const ushort column = (quad & 2) * 2 + (lane % 2) * 2;
+    return ushort2(column, row);
+}
+
+inline float fa_hd32_row_max(float value) {
+    value = max(value, simd_shuffle_xor(value, ushort(1)));
+    return max(value, simd_shuffle_xor(value, ushort(8)));
+}
+
+inline float fa_hd32_row_sum(float value) {
+    value += simd_shuffle_xor(value, ushort(1));
+    return value + simd_shuffle_xor(value, ushort(8));
+}
+
+// Per-storage-type load helpers and the element type fed to the GEMMs. bf16
+// tiles are simdgroup_bfloat8x8 when the compiler has `bfloat` (Metal 3.1);
+// otherwise bf16 is widened to fp32 tiles. fp32 inputs use fp32 tiles.
+// Accumulators (S and O) are always fp32.
+template <typename T>
+struct FaHd32Io;
+
+template <>
+struct FaHd32Io<float> {
+    typedef float mma_type;
+    typedef float4 vec4;
+    static inline vec4 load4(const device float* data, uint index) {
+        return *reinterpret_cast<const device float4*>(data + index);
+    }
+    static inline mma_type element(float value) {
+        return value;
+    }
+};
+
+template <>
+struct FaHd32Io<ushort> {
+#if defined(__HAVE_BFLOAT__)
+    typedef bfloat mma_type;
+    static inline mma_type element(ushort bits) {
+        return as_type<bfloat>(bits);
+    }
+#else
+    typedef float mma_type;
+    static inline mma_type element(ushort bits) {
+        return as_type<float>(uint(bits) << 16);
+    }
+#endif
+    typedef ushort4 vec4;
+    static inline vec4 load4(const device ushort* data, uint index) {
+        return *reinterpret_cast<const device ushort4*>(data + index);
+    }
+};
+
+// Computes a block of FA_HD32_BLOCK_Q query rows of one (batch, head).
 //
 // q, out: (rows, 32) with rows = batch * heads * query_length
 // k, v:   (batch * heads, key_length, 32)
 // bias:   indexed with the strides in `params`; ignored unless has_bias
 //
-// The launch must use a 1-D grid of rows * 32 threads and a threadgroup
-// size that is a multiple of 32, so every simdgroup maps to exactly one row.
+// The launch must use FA_HD32_THREADS threads per threadgroup and one
+// threadgroup per (batch * head, query block): batch * heads *
+// ceil(query_length / FA_HD32_BLOCK_Q) threadgroups. `group` is the
+// threadgroup index and `thread_index` the thread index inside it. No
+// threadgroup memory and no barriers are used: each simdgroup is
+// independent.
 //
-// A key whose bias is -inf is skipped. A row where every key is skipped
-// has an empty running sum (l == 0) and writes zeros. A finite bias, even
-// finfo.min, is never treated as a mask.
+// Simdgroup s owns query rows [8 s, 8 s + 8) of the block. Q and the fp32 O
+// accumulator stay in registers as four 8x8 tiles each. Keys are walked in
+// blocks of FA_HD32_BLOCK_K. Each lane loads its K and V tile elements
+// straight from device memory (zero past the last key), then the simdgroup
+// computes S = Q Kᵀ, updates the online softmax and accumulates O += P V.
+//
+// The head dimension is split as d = 4 i + t across the four tiles t, with
+// i the index inside a tile. Both GEMMs sum or index over d consistently, so
+// the result is unchanged, and every lane's Q, K, V and O elements become
+// contiguous runs of 4 or 8 values that load and store as vectors.
+//
+// A key whose bias is -inf, or past key_length, gets p = 0 and never moves
+// the running max. A row where every key is masked has an empty running
+// sum (l == 0) and writes zeros. A finite bias, even finfo.min, is never
+// treated as a mask. Query rows past query_length compute on zeros and are
+// not stored.
 template <typename T, typename Bias>
-inline void flash_attention_hd32_row(
+inline void flash_attention_hd32_block(
     const device T* q,
     const device T* k,
     const device T* v,
     Bias bias,
     device T* out,
     FaHd32Params params,
-    uint thread_id) {
-    const uint row = thread_id / FA_HD32_HEAD_DIM;
-    const uint lane = thread_id % FA_HD32_HEAD_DIM;
-    // All 32 lanes of a simdgroup share `row`, so they exit together and
-    // simd_sum below always sees a full simdgroup.
-    if (row >= params.rows) {
+    uint group,
+    uint thread_index) {
+    typedef FaHd32Io<T> Io;
+    typedef typename Io::mma_type M;
+    typedef typename Io::vec4 V4;
+
+    const uint query_blocks = (params.query_length + FA_HD32_BLOCK_Q - 1) / FA_HD32_BLOCK_Q;
+    const uint batch_head = group / query_blocks;
+    const uint simdgroup = thread_index / FA_HD32_SIMD_WIDTH;
+    const uint first_query = (group % query_blocks) * FA_HD32_BLOCK_Q + simdgroup * FA_HD32_TILE;
+    // Both tests are uniform across the simdgroup, so every shuffle and
+    // matrix operation below still sees all 32 lanes.
+    if (batch_head * params.query_length >= params.rows || first_query >= params.query_length) {
         return;
     }
-    const uint batch_head = row / params.query_length;
-    const uint query = row % params.query_length;
+    const ushort2 coord = fa_hd32_tile_coord(ushort(thread_index % FA_HD32_SIMD_WIDTH));
+    const uint query = first_query + coord.y;
+    const bool query_valid = query < params.query_length;
+    const uint row = batch_head * params.query_length + query;
     const uint head_offset = batch_head * params.key_length * FA_HD32_HEAD_DIM;
     const device T* k_head = k + head_offset;
     const device T* v_head = v + head_offset;
     const uint bias_row = (batch_head / params.heads) * params.bias_stride_b +
                           (batch_head % params.heads) * params.bias_stride_h +
                           query * params.bias_stride_q;
-
+    const bool load_bias = params.has_bias && query_valid;
+    const float neg_flt_max = as_type<float>(FA_HD32_NEG_FLT_MAX_BITS);
     // Fold the softmax scale into log2(e) so the exponentials are exp2.
-    const float q_scaled =
-        fa_hd32_load(q, row * FA_HD32_HEAD_DIM + lane) * (params.scale * M_LOG2E_F);
+    const float qk_scale = params.scale * M_LOG2E_F;
 
-    // Running max, sum and output. running_sum == 0 means no key has been
-    // accepted yet; running_max is only read after the first accepted key,
-    // so no -inf is ever used in arithmetic.
-    float running_max = 0.0f;
-    float running_sum = 0.0f;
-    float acc = 0.0f;
-
-    for (uint j = 0; j < params.key_length; ++j) {
-        // The bias and the score depend only on (row, j), so every branch
-        // below is uniform across the simdgroup.
-        float bias_log2 = 0.0f;
-        if (params.has_bias) {
-            const float b = fa_hd32_load(bias, bias_row + j * params.bias_stride_k);
-            if (fa_hd32_is_neg_inf(b)) {
-                continue;
-            }
-            bias_log2 = fa_hd32_finite(b * M_LOG2E_F);
+    // Q tile t, element (r, c + e) is Q[r][4 (c + e) + t]: the lane's eight
+    // elements are Q[r][4 c .. 4 c + 8).
+    simdgroup_matrix<M, 8, 8> q_tiles[FA_HD32_D_TILES];
+    simdgroup_float8x8 o_tiles[FA_HD32_D_TILES];
+    {
+        V4 q_lo = V4(0);
+        V4 q_hi = V4(0);
+        if (query_valid) {
+            const uint offset = row * FA_HD32_HEAD_DIM + 4 * coord.x;
+            q_lo = Io::load4(q, offset);
+            q_hi = Io::load4(q, offset + 4);
         }
-        const uint offset = j * FA_HD32_HEAD_DIM + lane;
-        const float score =
-            fa_hd32_finite(simd_sum(q_scaled * fa_hd32_load(k_head, offset)) + bias_log2);
-        const float value = fa_hd32_load(v_head, offset);
-        if (running_sum == 0.0f) {
-            running_max = score;
-            running_sum = 1.0f;
-            acc = value;
-        } else if (score > running_max) {
-            // Rescale the running sum and output only when the max rises.
-            const float correction = exp2(running_max - score);
-            running_max = score;
-            running_sum = running_sum * correction + 1.0f;
-            acc = acc * correction + value;
-        } else {
-            const float p = exp2(score - running_max);
-            running_sum += p;
-            acc += p * value;
+        FA_HD32_UNROLL
+        for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
+            q_tiles[t].thread_elements()[0] = Io::element(q_lo[t]);
+            q_tiles[t].thread_elements()[1] = Io::element(q_hi[t]);
+            o_tiles[t] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
         }
     }
 
-    const float result = running_sum == 0.0f ? 0.0f : acc / running_sum;
-    fa_hd32_store(out, row * FA_HD32_HEAD_DIM + lane, result);
+    // Running max and sum of this lane's row. running_max starts at the
+    // finite -FLT_MAX and only takes finite scores, so no -inf is ever used
+    // in arithmetic. running_sum == 0 means no key has been accepted yet.
+    float running_max = neg_flt_max;
+    float running_sum = 0.0f;
+
+    for (uint key_start = 0; key_start < params.key_length; key_start += FA_HD32_BLOCK_K) {
+        const bool full_block = params.key_length - key_start >= FA_HD32_BLOCK_K;
+
+        // S = Q Kᵀ. Kᵀ tile t, element (r, c + e) is K[key c + e][4 r + t]:
+        // one 4-element load per key.
+        simdgroup_float8x8 s_tiles[FA_HD32_K_TILES];
+        FA_HD32_UNROLL
+        for (uint j = 0; j < FA_HD32_K_TILES; ++j) {
+            const uint key = key_start + j * FA_HD32_TILE + coord.x;
+            const uint offset = key * FA_HD32_HEAD_DIM + 4 * coord.y;
+            V4 k_lo = V4(0);
+            V4 k_hi = V4(0);
+            if (full_block || key < params.key_length) {
+                k_lo = Io::load4(k_head, offset);
+            }
+            if (full_block || key + 1 < params.key_length) {
+                k_hi = Io::load4(k_head, offset + FA_HD32_HEAD_DIM);
+            }
+            s_tiles[j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+            FA_HD32_UNROLL
+            for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
+                simdgroup_matrix<M, 8, 8> k_t;
+                k_t.thread_elements()[0] = Io::element(k_lo[t]);
+                k_t.thread_elements()[1] = Io::element(k_hi[t]);
+                simdgroup_multiply_accumulate(s_tiles[j], q_tiles[t], k_t, s_tiles[j]);
+            }
+        }
+
+        // Scale, add the bias, mask, and take the block's row max over
+        // valid keys.
+        bool valid[FA_HD32_K_TILES][2];
+        float block_max = neg_flt_max;
+        FA_HD32_UNROLL
+        for (uint j = 0; j < FA_HD32_K_TILES; ++j) {
+            FA_HD32_UNROLL
+            for (uint e = 0; e < 2; ++e) {
+                const uint key = key_start + j * FA_HD32_TILE + coord.x + e;
+                float score = s_tiles[j].thread_elements()[e] * qk_scale;
+                bool ok = full_block || key < params.key_length;
+                if (ok && load_bias) {
+                    const float b = fa_hd32_load(bias, bias_row + key * params.bias_stride_k);
+                    if (fa_hd32_is_neg_inf(b)) {
+                        ok = false;
+                    } else {
+                        score += fa_hd32_finite(b * M_LOG2E_F);
+                    }
+                }
+                score = fa_hd32_finite(score);
+                s_tiles[j].thread_elements()[e] = score;
+                valid[j][e] = ok;
+                block_max = ok ? max(block_max, score) : block_max;
+            }
+        }
+        block_max = fa_hd32_row_max(block_max);
+
+        // Online softmax. correction is exp2(0) = 1 when the max does not
+        // rise, and the difference is clamped so it never becomes -inf.
+        const float new_max = max(running_max, block_max);
+        const float correction = exp2(fa_hd32_finite(running_max - new_max));
+        running_max = new_max;
+
+        float block_sum = 0.0f;
+        FA_HD32_UNROLL
+        for (uint j = 0; j < FA_HD32_K_TILES; ++j) {
+            FA_HD32_UNROLL
+            for (uint e = 0; e < 2; ++e) {
+                const float p =
+                    valid[j][e] ? exp2(s_tiles[j].thread_elements()[e] - running_max) : 0.0f;
+                s_tiles[j].thread_elements()[e] = p;
+                block_sum += p;
+            }
+        }
+        running_sum = running_sum * correction + fa_hd32_row_sum(block_sum);
+
+        // O = O * correction + P V. P stays fp32. V tile t, element
+        // (r, c + e) is V[key r][4 (c + e) + t]: the lane's eight elements
+        // are V[key r][4 c .. 4 c + 8).
+        FA_HD32_UNROLL
+        for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
+            o_tiles[t].thread_elements() *= correction;
+        }
+        FA_HD32_UNROLL
+        for (uint j = 0; j < FA_HD32_K_TILES; ++j) {
+            const uint key = key_start + j * FA_HD32_TILE + coord.y;
+            V4 v_lo = V4(0);
+            V4 v_hi = V4(0);
+            if (full_block || key < params.key_length) {
+                const uint offset = key * FA_HD32_HEAD_DIM + 4 * coord.x;
+                v_lo = Io::load4(v_head, offset);
+                v_hi = Io::load4(v_head, offset + 4);
+            }
+            FA_HD32_UNROLL
+            for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
+                simdgroup_matrix<M, 8, 8> v_t;
+                v_t.thread_elements()[0] = Io::element(v_lo[t]);
+                v_t.thread_elements()[1] = Io::element(v_hi[t]);
+                simdgroup_multiply_accumulate(o_tiles[t], s_tiles[j], v_t, o_tiles[t]);
+            }
+        }
+    }
+
+    if (!query_valid) {
+        return;
+    }
+    // O tile t, element (r, c + e) is O[r][4 (c + e) + t], so the lane
+    // writes O[r][4 c .. 4 c + 8) directly to device memory.
+    const float inv_sum = running_sum == 0.0f ? 0.0f : 1.0f / running_sum;
+    const uint offset = row * FA_HD32_HEAD_DIM + 4 * coord.x;
+    FA_HD32_UNROLL
+    for (uint e = 0; e < 2; ++e) {
+        FA_HD32_UNROLL
+        for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
+            fa_hd32_store(out, offset + 4 * e + t, o_tiles[t].thread_elements()[e] * inv_sum);
+        }
+    }
 }
 
 // PyTorch MPS entry points. `dims` holds FA_HD32_DIM_COUNT int32 values in
@@ -231,8 +429,10 @@ kernel void flash_attention_hd32(
     device T* out [[buffer(4)]],
     const device int* dims [[buffer(5)]],
     const device float* scale [[buffer(6)]],
-    uint thread_id [[thread_position_in_grid]]) {
-    flash_attention_hd32_row(q, k, v, bias, out, fa_hd32_params(dims, scale[0]), thread_id);
+    uint group [[threadgroup_position_in_grid]],
+    uint thread_index [[thread_index_in_threadgroup]]) {
+    flash_attention_hd32_block(
+        q, k, v, bias, out, fa_hd32_params(dims, scale[0]), group, thread_index);
 }
 
 #define FA_HD32_INSTANTIATE(NAME, T)                                     \
@@ -245,7 +445,8 @@ kernel void flash_attention_hd32(
         device T* out [[buffer(4)]],                                     \
         const device int* dims [[buffer(5)]],                            \
         const device float* scale [[buffer(6)]],                         \
-        uint thread_id [[thread_position_in_grid]]);
+        uint group [[threadgroup_position_in_grid]],                     \
+        uint thread_index [[thread_index_in_threadgroup]]);
 
 FA_HD32_INSTANTIATE(bfloat, ushort)
 FA_HD32_INSTANTIATE(float, float)

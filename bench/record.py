@@ -66,7 +66,7 @@ def _git() -> tuple[str, bool]:
     return commit, bool(status.strip())
 
 
-def _percentile(sorted_values: list[float], fraction: float) -> float:
+def percentile(sorted_values: list[float], fraction: float) -> float:
     position = (len(sorted_values) - 1) * fraction
     low = math.floor(position)
     high = math.ceil(position)
@@ -83,8 +83,8 @@ def _timing(samples, flops: int, bytes_per_call: int) -> dict:
     return {
         "median_ms": median,
         "min_ms": values[0],
-        "p10_ms": _percentile(values, 0.1),
-        "p90_ms": _percentile(values, 0.9),
+        "p10_ms": percentile(values, 0.1),
+        "p90_ms": percentile(values, 0.9),
         "iterations": len(values),
         "bytes_per_call": bytes_per_call,
         "tflops": flops / (median * 1e9),
