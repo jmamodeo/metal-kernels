@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Benchmark placeholder.
 
-There is nothing to time until a kernel exists. This script does not invent
-timings. A real benchmark is added under ``bench/<name>.py`` with its kernel.
+It lists registered kernels and does not time them. This script does not
+invent timings. A real benchmark is added under ``bench/<name>.py`` as step 4
+of that kernel.
 """
 
 from __future__ import annotations
@@ -24,10 +25,7 @@ def main() -> int:
     if not names:
         print("No kernels to benchmark.")
         return 0
-    print(
-        "Benchmark scripts are not timed by this placeholder: "
-        + ", ".join(f"bench/{name}.py" for name in names)
-    )
+    print("No timings recorded. Kernels without a benchmark script yet: " + ", ".join(names))
     return 0
 
 
