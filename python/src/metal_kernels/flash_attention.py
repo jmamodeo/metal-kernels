@@ -7,8 +7,9 @@ MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
 Version 1 is the tiled ``simdgroup_matrix`` kernel from the design note:
-one threadgroup of two simdgroups per 16 query rows of one (batch, head),
-K/V walked in 64-key blocks staged through threadgroup memory.
+one threadgroup of four simdgroups per 32 query rows of one (batch, head),
+K/V walked in 64-key blocks loaded straight from device memory into
+registers, with no threadgroup memory.
 """
 
 from __future__ import annotations
@@ -21,21 +22,20 @@ from metal_kernels.loader import metal_source
 
 KERNEL_NAME = "flash_attention_hd32"
 HEAD_DIM = 32
-QUERY_BLOCK = 16
+# Mirrors FA_HD32_BLOCK_Q, FA_HD32_BLOCK_K and FA_HD32_THREADS in the shader:
+# 8 query rows per simdgroup, 32 threads per simdgroup.
+QUERY_BLOCK = 32
 KEY_BLOCK = 64
-THREADGROUP_SIZE = 64
-# K and V blocks staged as fp32 in threadgroup memory.
-THREADGROUP_MEMORY_BYTES = 2 * KEY_BLOCK * HEAD_DIM * 4
+THREADGROUP_SIZE = QUERY_BLOCK // 8 * 32
+# K and V go straight from device memory to registers.
+THREADGROUP_MEMORY_BYTES = 0
 BACKENDS = ("mlx", "mps")
 
 # Buffer offsets in the shader are 32-bit, and MLX grids are 32-bit ints.
 _MAX_ELEMENTS = 2**31 - 1
 
-# The MLX-generated kernel declares the threadgroup tiles and calls the block
-# function in the shared source.
+# The MLX-generated kernel calls the block function in the shared source.
 _MLX_BODY = """
-    threadgroup float fa_k_tile[FA_HD32_TILE_ELEMENTS];
-    threadgroup float fa_v_tile[FA_HD32_TILE_ELEMENTS];
     flash_attention_hd32_block(
         fa_hd32_bits(q),
         fa_hd32_bits(k),
@@ -43,8 +43,6 @@ _MLX_BODY = """
         fa_hd32_bits(bias),
         fa_hd32_bits(out),
         fa_hd32_params(dims, scale[0]),
-        fa_k_tile,
-        fa_v_tile,
         threadgroup_position_in_grid.x,
         thread_index_in_threadgroup);
 """
@@ -172,17 +170,13 @@ def _flash_attention_hd32_mlx(q, k, v, bias, scale):
         shape4, strides = bias_strides(bias.shape, target)
         bias = bias.reshape(shape4)
     else:
-        bias, strides = mx.zeros((1,), dtype=q.dtype), (0, 0, 0, 0)
+        strides = (0, 0, 0, 0)
+    dims, scale_array, placeholder = _mlx_constants(
+        tuple(_dims(geometry, strides, has_bias)), scale, q.dtype
+    )
 
     (out,) = _mlx_kernel()(
-        inputs=[
-            q,
-            k,
-            v,
-            bias,
-            mx.array(_dims(geometry, strides, has_bias), dtype=mx.int32),
-            mx.array([scale], dtype=mx.float32),
-        ],
+        inputs=[q, k, v, bias if has_bias else placeholder, dims, scale_array],
         output_shapes=[q.shape],
         output_dtypes=[q.dtype],
         grid=(threads, 1, 1),
@@ -205,25 +199,59 @@ def _flash_attention_hd32_mps(q, k, v, bias, scale):
     has_bias = bias is not None
     if has_bias:
         shape4, strides = bias_strides(bias.shape, target)
-        bias = bias.reshape(shape4).contiguous()
+        bias = _contiguous(bias.reshape(shape4))
     else:
-        bias, strides = torch.zeros(1, dtype=q.dtype, device=q.device), (0, 0, 0, 0)
+        strides = (0, 0, 0, 0)
+    dims, scale_tensor, placeholder = _mps_constants(
+        tuple(_dims(geometry, strides, has_bias)), scale, q.dtype, q.device
+    )
 
-    q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
-    out = torch.empty_like(q)
+    q, k, v = _contiguous(q), _contiguous(k), _contiguous(v)
+    out = torch.empty(q.shape, dtype=q.dtype, device=q.device)
     name = "bfloat" if q.dtype == torch.bfloat16 else "float"
     getattr(_mps_library(), f"{KERNEL_NAME}_{name}")(
         q,
         k,
         v,
-        bias,
+        bias if has_bias else placeholder,
         out,
-        torch.tensor(_dims(geometry, strides, has_bias), dtype=torch.int32, device=q.device),
-        torch.tensor([scale], dtype=torch.float32, device=q.device),
+        dims,
+        scale_tensor,
         threads=threads,
         group_size=threadgroup,
     )
     return out
+
+
+def _contiguous(tensor):
+    return tensor if tensor.is_contiguous() else tensor.contiguous()
+
+
+# The `dims` and `scale` buffers and the unused-bias placeholder depend only
+# on the launch, so repeated calls at one shape reuse them instead of
+# allocating on every launch. The kernel never writes them.
+@functools.lru_cache(maxsize=32)
+def _mlx_constants(dims: tuple[int, ...], scale: float, dtype):
+    import mlx.core as mx
+
+    constants = (
+        mx.array(dims, dtype=mx.int32),
+        mx.array([scale], dtype=mx.float32),
+        mx.zeros((1,), dtype=dtype),
+    )
+    mx.eval(*constants)
+    return constants
+
+
+@functools.lru_cache(maxsize=32)
+def _mps_constants(dims: tuple[int, ...], scale: float, dtype, device):
+    import torch
+
+    return (
+        torch.tensor(dims, dtype=torch.int32, device=device),
+        torch.tensor([scale], dtype=torch.float32, device=device),
+        torch.zeros(1, dtype=dtype, device=device),
+    )
 
 
 @functools.lru_cache(maxsize=1)

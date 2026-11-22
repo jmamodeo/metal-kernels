@@ -55,14 +55,18 @@ def test_kernel_is_registered(monkeypatch):
     assert "FA_HD32_INSTANTIATE(bfloat, ushort)" in source
     assert "FA_HD32_INSTANTIATE(float, float)" in source
     assert "inline void flash_attention_hd32_block(" in source
-    assert "constant constexpr uint FA_HD32_BLOCK_Q = 16;" in source
+    assert "constant constexpr uint FA_HD32_BLOCK_Q = 32;" in source
     assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
 
 
 def test_launch_constants_match_the_shader():
-    # 16 query rows per threadgroup, 8 per simdgroup: two simdgroups.
-    assert (QUERY_BLOCK, THREADGROUP_SIZE) == (16, 64)
-    assert THREADGROUP_MEMORY_BYTES == 2 * 64 * 32 * 4
+    # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. K and
+    # V go straight to registers, so no threadgroup memory.
+    assert (QUERY_BLOCK, THREADGROUP_SIZE) == (32, 128)
+    assert THREADGROUP_MEMORY_BYTES == 0
+    source = metal_source(KERNEL_NAME)
+    assert "threadgroup float" not in source
+    assert "threadgroup_barrier" not in source
 
 
 def test_import_does_not_load_gpu_frameworks():
@@ -88,11 +92,12 @@ def test_backend_is_keyword_only():
 @pytest.mark.parametrize(
     ("shape", "expected"),
     [
-        ((1, 1, 1, 1), ((1, 1, 1, 1), 64, 64)),
-        ((1, 2, 5, 7), ((10, 2, 5, 7), 128, 64)),
-        ((2, 3, 17, 33), ((102, 3, 17, 33), 6 * 2 * 64, 64)),
-        (SAM3_ENCODER, ((41472, 8, 5184, 5184), 8 * 324 * 64, THREADGROUP_SIZE)),
-        (SAM3_CROSS, ((1608, 8, 201, 5184), 8 * 13 * 64, THREADGROUP_SIZE)),
+        ((1, 1, 1, 1), ((1, 1, 1, 1), 128, 128)),
+        ((1, 2, 5, 7), ((10, 2, 5, 7), 256, 128)),
+        ((2, 3, 17, 33), ((102, 3, 17, 33), 6 * 128, 128)),
+        ((1, 2, 50, 7), ((100, 2, 50, 7), 2 * 2 * 128, 128)),
+        (SAM3_ENCODER, ((41472, 8, 5184, 5184), 8 * 162 * 128, THREADGROUP_SIZE)),
+        (SAM3_CROSS, ((1608, 8, 201, 5184), 8 * 7 * 128, THREADGROUP_SIZE)),
     ],
 )
 def test_launch_geometry(shape, expected):
@@ -243,13 +248,13 @@ def _check(run, arrays, dtype, scale=None):
     return actual, rounded, expected
 
 
-# Query tail: 50 is not a multiple of the 16-row query block. Key tail:
+# Query tail: 50 is not a multiple of the 32-row query block. Key tail:
 # 5184 + 17 is not a multiple of the 64-key block.
 TAIL_QUERY_LENGTH = 50
 TAIL_KEY_LENGTH = 5184 + 17
 TAIL_SHAPES = [
     (1, 2, TAIL_QUERY_LENGTH, 64),
-    (1, 2, 16, TAIL_KEY_LENGTH),
+    (1, 2, 32, TAIL_KEY_LENGTH),
     (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH),
 ]
 
@@ -289,7 +294,8 @@ def test_matches_reference_tail_blocks_with_bias(run, dtype):
 @pytest.mark.parametrize("run", _HOSTS)
 @pytest.mark.parametrize("dtype", _DTYPES)
 def test_fully_masked_rows_in_partial_query_block_are_zero(run, dtype):
-    # Rows 48 and 49 form the partial last query block of Lq = 50.
+    # Rows 32 to 49 form the partial last query block of Lq = 50, and rows 48
+    # and 49 the partial last simdgroup inside it.
     shape = (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH)
     q, k, v, bias = _random_inputs(shape, seed=14, bias_shape=shape)
     bias[0, 0, 49, :] = -np.inf

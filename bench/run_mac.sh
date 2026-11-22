@@ -22,7 +22,7 @@ case "$version" in
         default_design="per-row online softmax: one simdgroup per query row, one lane per head-dim column, simd_sum dot products, fp32 math, no threadgroup memory"
         ;;
     v1)
-        default_design="tiled simdgroup_matrix: one threadgroup of 2 simdgroups per 16 query rows, 8 rows per simdgroup, 64-key K/V blocks staged as fp32 in threadgroup memory (16 KB), fp32 simdgroup_float8x8 S=QK^T and O+=PV, exp2 online softmax with shuffle-xor row reductions"
+        default_design="tiled simdgroup_matrix: one threadgroup of 4 simdgroups per 32 query rows, 8 rows per simdgroup, 64-key K/V blocks loaded per lane from device into registers as vectors (no threadgroup memory, no barriers), bf16 simdgroup_matrix inputs with fp32 S and O accumulators (P stays fp32), exp2 online softmax with shuffle-xor row reductions"
         ;;
     *)
         default_design=""
