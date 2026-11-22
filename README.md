@@ -100,6 +100,12 @@ Copy [kernels/_template](kernels/_template/README.md) to `kernels/<name>/` and a
 
 Prefer one kernel per change so the reference, the shader, and the test can be reviewed together. Tests that launch Metal belong behind the `metal` marker so they skip on machines without it. Record benchmark numbers you measured; the `bench/` placeholder does not invent timings.
 
+CI runs `lint`, `test`, and `citation` on Linux, plus a `metal-compile` job on `macos-latest`. That job compiles every `.metal` file in the repository with `xcrun --sdk macosx metal -std=metal3.1` and links each one with `xcrun --sdk macosx metallib`. It does not run anything. Outputs go to a temporary directory, never into the repository, and the job fails with the file name if any shader fails to compile or link. Run the same check on a Mac with Xcode from the repository root:
+
+```bash
+tools/compile_metal.sh
+```
+
 The project is released under the Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Citation

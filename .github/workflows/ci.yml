@@ -41,3 +41,15 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install cffconvert && cffconvert --validate
+
+  metal-compile:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Metal toolchain
+        run: |
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+      - name: Compile .metal files
+        run: tools/compile_metal.sh
