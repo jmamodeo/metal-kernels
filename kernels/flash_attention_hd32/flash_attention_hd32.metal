@@ -20,6 +20,7 @@ using namespace metal;
 
 constant constexpr uint FA_HD32_HEAD_DIM = 32;
 constant constexpr uint FA_HD32_NEG_INF_BITS = 0xFF800000u;
+constant constexpr uint FA_HD32_NEG_FLT_MAX_BITS = 0xFF7FFFFFu;
 
 // Layout of the int32 `dims` buffer.
 enum FaHd32Dim : uint {
@@ -83,6 +84,12 @@ inline bool fa_hd32_is_neg_inf(float value) {
     return as_type<uint>(value) == FA_HD32_NEG_INF_BITS;
 }
 
+// Maps a -inf produced by overflow (for example a finfo.min bias times
+// log2(e)) to -FLT_MAX, so finite inputs keep finite scores.
+inline float fa_hd32_finite(float value) {
+    return fa_hd32_is_neg_inf(value) ? as_type<float>(FA_HD32_NEG_FLT_MAX_BITS) : value;
+}
+
 // View an MLX buffer as the storage type above, keeping its address space.
 // Any 2-byte element type (MLX's `bfloat16_t`) becomes ushort bits; float
 // stays float. MLX passes inputs with fewer than 8 elements in the constant
@@ -138,7 +145,8 @@ inline FaHd32Params fa_hd32_params(Dims dims, float scale) {
 // size that is a multiple of 32, so every simdgroup maps to exactly one row.
 //
 // A key whose bias is -inf is skipped. A row where every key is skipped
-// has an empty running sum (l == 0) and writes zeros.
+// has an empty running sum (l == 0) and writes zeros. A finite bias, even
+// finfo.min, is never treated as a mask.
 template <typename T, typename Bias>
 inline void flash_attention_hd32_row(
     const device T* q,
@@ -184,14 +192,11 @@ inline void flash_attention_hd32_row(
             if (fa_hd32_is_neg_inf(b)) {
                 continue;
             }
-            bias_log2 = b * M_LOG2E_F;
+            bias_log2 = fa_hd32_finite(b * M_LOG2E_F);
         }
         const uint offset = j * FA_HD32_HEAD_DIM + lane;
         const float score =
-            simd_sum(q_scaled * fa_hd32_load(k_head, offset)) + bias_log2;
-        if (fa_hd32_is_neg_inf(score)) {
-            continue;
-        }
+            fa_hd32_finite(simd_sum(q_scaled * fa_hd32_load(k_head, offset)) + bias_log2);
         const float value = fa_hd32_load(v_head, offset);
         if (running_sum == 0.0f) {
             running_max = score;

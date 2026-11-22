@@ -280,6 +280,21 @@ def test_fully_masked_rows_are_zero(run, dtype, key_length):
 @pytest.mark.metal
 @pytest.mark.parametrize("run", _HOSTS)
 @pytest.mark.parametrize("dtype", _DTYPES)
+def test_finite_minimum_bias_is_not_a_mask(run, dtype):
+    # finfo.min is a common mask value. It is finite, so a row masked with it
+    # everywhere averages v, as the reference and the built-ins do.
+    q, k, v, bias = _random_inputs((1, 2, 6, 100), seed=8, bias_shape=(1, 2, 6, 100))
+    minimum = float(np.finfo(np.float32).min) if dtype == "float32" else -3.3895313892515355e38
+    bias[0, 0, 1, :] = minimum
+    bias[0, 1, 2, :50] = minimum
+    actual, rounded, _ = _check(run, [q, k, v, bias], dtype)
+    rtol, atol = TOLERANCE[dtype]
+    np.testing.assert_allclose(actual[0, 0, 1], rounded[2][0, 0].mean(axis=0), rtol=rtol, atol=atol)
+
+
+@pytest.mark.metal
+@pytest.mark.parametrize("run", _HOSTS)
+@pytest.mark.parametrize("dtype", _DTYPES)
 def test_matches_reference_with_explicit_scale(run, dtype):
     q, k, v, bias = _random_inputs((1, 2, 16, 40), seed=3, bias_shape=(16, 40))
     _check(run, [q, k, v, bias], dtype, scale=0.3)
