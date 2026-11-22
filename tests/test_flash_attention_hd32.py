@@ -123,6 +123,9 @@ def test_launch_geometry_rejects_bad_shapes():
         launch_geometry(q, (1, 2, 0, 32), (1, 2, 0, 32))
     with pytest.raises(ValueError, match="at most"):
         launch_geometry((1, 1, 2**26, 32), (1, 1, 1, 32), (1, 1, 1, 32))
+    # One query per head still launches a full 64-thread group.
+    with pytest.raises(ValueError, match="at most"):
+        launch_geometry((2**25, 1, 1, 32), (2**25, 1, 1, 32), (2**25, 1, 1, 32))
 
 
 @pytest.mark.parametrize(

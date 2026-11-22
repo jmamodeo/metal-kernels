@@ -103,6 +103,8 @@ def launch_geometry(
         raise ValueError(f"inputs must have at most {_MAX_ELEMENTS} elements")
     groups = batch * heads * -(-query_length // QUERY_BLOCK)
     threads = groups * THREADGROUP_SIZE
+    if threads > _MAX_ELEMENTS:
+        raise ValueError(f"the launch grid must have at most {_MAX_ELEMENTS} threads")
     return (rows, heads, query_length, key_length), threads, THREADGROUP_SIZE
 
 
