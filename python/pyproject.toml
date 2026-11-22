@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "metal-kernels"
 version = "0.0.0"
-description = "Metal kernel sources for Apple silicon. conv3x3 includes a float32 shader launched from Python."
+description = "Metal kernel sources for Apple silicon. The only planned kernel is FlashAttention for head dim 32."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

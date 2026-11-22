@@ -3,7 +3,6 @@
 
 This package reads ``.metal`` source text from ``kernels/``. Importing it
 does not compile or run kernels, and it does not import MLX or PyTorch.
-``metal_kernels.conv3x3`` is the launch path for that kernel.
 """
 
 from __future__ import annotations
