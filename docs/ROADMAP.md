@@ -32,16 +32,18 @@ Add a script under `bench/` that times the kernel against the built-in framework
 
 ## Kernels
 
-### conv3x3
+The earlier conv3x3 kernel was dropped on Nov 22, 2026 by John's decision. It is no longer in this repository.
 
-A 3×3 convolution, first measured in the SAM 3 FPN neck and the mask-head pixel decoder. Input `[1, 256, 288, 288]`, weight `[256, 256, 3, 3]`, stride 1, padding 1, dilation 1, groups 1, with bias. The traced forward ran it in bfloat16. The reference computes float32. Rank FLOPs are 9.784e10 per call.
+### FlashAttention hd32
+
+Fused FlashAttention-style scaled dot-product attention for head dim 32. The SAM 3 detector encoder calls it at `[1, 8, 5184, 32]` in bfloat16, six times per image. This is the only kernel planned for the collection.
 
 | Step | Status |
 | --- | --- |
-| 1. NumPy reference | done (`reference/conv3x3.py`) |
-| 2. Metal kernel from Python | in progress (`kernels/conv3x3/conv3x3.metal`, `metal_kernels.conv3x3`). Mac timings are not recorded yet. |
+| 1. NumPy reference | not started |
+| 2. Metal kernel from Python | not started |
 | 3. Swift host | not started |
-| 4. Benchmark | script written (`bench/conv3x3.py`). Numbers are not recorded yet. |
+| 4. Benchmark | not started |
 
 ## Workloads
 
@@ -53,7 +55,7 @@ A 3×3 convolution, first measured in the SAM 3 FPN neck and the mask-head pixel
 
 Traced in [sam3-op-inventory.md](sam3-op-inventory.md). One random-init forward pass at 1008px is 6.379e12 rank FLOPs: matmul 75.8%, attention 18.4%, convolution 5.7%. The vision encoder is 84.6% of that. The write-up has the shapes, the CUDA blockers, and the source review of PyTorch MPS 2.15.0 and MLX 0.32.4.
 
-The first kernel is [conv3x3](../kernels/conv3x3/README.md). Step 1, the NumPy reference, is done. Step 2, the Metal kernel from Python, is in progress: the shader and the MLX and PyTorch MPS launches are written, and a Mac timing is still to be filled in. MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU. The M3 Max timings in [bench/sam3_shapes/results](../bench/sam3_shapes/results/m3-max-2026-11-18.md) show no CPU fallbacks. PyTorch MPS is about 2x slower than MLX on the 3×3 and transposed 2×2 convolutions, which is why conv3x3 comes first. MLX is about 2x slower than PyTorch on the detector attention at head size 32. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
+MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU. The M3 Max timings in [bench/sam3_shapes/results](../bench/sam3_shapes/results/m3-max-2026-11-18.md) show no CPU fallbacks. The only kernel being written is FlashAttention hd32: MLX is about 2x slower than PyTorch on the detector attention at head size 32, and MLX fused SDPA falls back at that head dim. A 3×3 convolution kernel was started earlier because PyTorch MPS is about 2x slower than MLX on the 3×3 and transposed 2×2 convolutions; John dropped that kernel on Nov 22, 2026. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
 
 #### MPS baseline
 
