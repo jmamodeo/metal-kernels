@@ -4,7 +4,7 @@ A community collection of Apple Metal GPU kernels for Apple silicon. Each kernel
 
 Kernels are chosen by profiling real models and writing a custom kernel only where the built-in Metal ops fall short. The first workload profiled is Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3). Its integration and shape benchmarks live in `metal_kernels.integrations.sam3` and `bench/sam3_shapes/`.
 
-The registry lists `conv3x3`. Its NumPy reference is in place, and its Metal shader is called from Python through MLX and PyTorch MPS. Swift is not started. The Mac benchmark numbers are not recorded yet.
+The registry is empty. The only kernel this collection will ship is a Metal FlashAttention implementation for head dim 32. The earlier conv3x3 kernel was dropped on Nov 22, 2026 by John's decision.
 
 ## Layout
 
@@ -59,7 +59,7 @@ The base package has no required dependencies. `pip install -e .` inside `python
 | `mlx` | MLX | Apple silicon, once a kernel calls `mx.fast.metal_kernel` |
 | `torch` | PyTorch | once a kernel calls `torch.mps.compile_shader` |
 
-MLX wheels and the PyTorch MPS backend are macOS only. `metal_kernels.conv3x3` imports them when it launches. They are not installed by the base package or the `dev` extra.
+MLX wheels and the PyTorch MPS backend are macOS only. A kernel's Python launch path imports them when it runs. They are not installed by the base package or the `dev` extra.
 
 Then, from the repository root:
 
@@ -68,7 +68,7 @@ pytest
 python -m metal_kernels
 ```
 
-`pytest` skips Metal execution tests when the host is not macOS. `python -m metal_kernels` prints the registry. Today that is `conv3x3`.
+`pytest` skips Metal execution tests when the host is not macOS. `python -m metal_kernels` prints the registry. Today it is empty.
 
 An editable install from a checkout is the supported way to find `kernels/`. The loader also honors `METAL_KERNELS_ROOT` when that variable points at the `kernels` directory. A non-editable wheel does not yet vendor the `.metal` sources.
 

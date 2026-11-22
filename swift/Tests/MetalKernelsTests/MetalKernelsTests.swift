@@ -21,11 +21,9 @@ final class MetalKernelsTests: XCTestCase {
         XCTAssertTrue(text.contains("metal-kernels-template: not a kernel"))
     }
 
-    func testConv3x3IsRegistered() throws {
+    func testRegistryIsEmpty() throws {
         unsetenv("METAL_KERNELS_ROOT")
-        XCTAssertEqual(try MetalKernels.kernelNames(), ["conv3x3"])
-        let source = try MetalKernels.metalSource(named: "conv3x3")
-        XCTAssertTrue(source.contains("kernel void conv3x3"))
+        XCTAssertEqual(try MetalKernels.kernelNames(), [])
     }
 
     func testTemplateIsNotAKernel() {
