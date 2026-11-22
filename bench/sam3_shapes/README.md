@@ -1,6 +1,6 @@
 # SAM 3 shape timings
 
-Times the built-in PyTorch and MLX ops at the shapes in [docs/sam3-op-inventory.md](../../docs/sam3-op-inventory.md). Run it on an Apple silicon Mac. The Linux CI machine has no MPS device, and a CPU timing of these shapes is not a stand-in.
+Times the built-in PyTorch and MLX ops at the shapes in [docs/sam3-op-inventory.md](../../docs/sam3-op-inventory.md). Run it on an Apple silicon Mac. A Linux machine has no MPS device, and a CPU timing of these shapes is not a stand-in.
 
 The script does not set `PYTORCH_ENABLE_MPS_FALLBACK`. An op MPS does not implement raises, and the CSV records that as `error`. If the variable is already set in the environment, a CPU fallback is recorded as `fallback` together with the warning text. Leave it unset for the run that decides whether a kernel is required.
 
