@@ -243,6 +243,16 @@ def _check(run, arrays, dtype, scale=None):
     return actual, rounded, expected
 
 
+# Query tail: 50 is not a multiple of the 16-row query block. Key tail:
+# 5184 + 17 is not a multiple of the 64-key block.
+TAIL_QUERY_LENGTH = 50
+TAIL_KEY_LENGTH = 5184 + 17
+TAIL_SHAPES = [
+    (1, 2, TAIL_QUERY_LENGTH, 64),
+    (1, 2, 16, TAIL_KEY_LENGTH),
+    (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH),
+]
+
 _HOSTS = [pytest.param(_run_mlx, id="mlx"), pytest.param(_run_mps, id="mps")]
 _DTYPES = ["bfloat16", "float32"]
 
@@ -254,6 +264,42 @@ _DTYPES = ["bfloat16", "float32"]
 def test_matches_reference_small(run, dtype, shape):
     q, k, v, _ = _random_inputs(shape, seed=sum(shape))
     _check(run, [q, k, v, None], dtype)
+
+
+@pytest.mark.metal
+@pytest.mark.parametrize("run", _HOSTS)
+@pytest.mark.parametrize("dtype", _DTYPES)
+@pytest.mark.parametrize("shape", TAIL_SHAPES, ids=["query-tail", "key-tail", "both-tails"])
+def test_matches_reference_tail_blocks(run, dtype, shape):
+    q, k, v, _ = _random_inputs(shape, seed=sum(shape))
+    _check(run, [q, k, v, None], dtype)
+
+
+@pytest.mark.metal
+@pytest.mark.parametrize("run", _HOSTS)
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_matches_reference_tail_blocks_with_bias(run, dtype):
+    shape = (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH)
+    q, k, v, bias = _random_inputs(shape, seed=13, bias_shape=shape)
+    bias.flat[::3] = -np.inf
+    _check(run, [q, k, v, bias], dtype)
+
+
+@pytest.mark.metal
+@pytest.mark.parametrize("run", _HOSTS)
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_fully_masked_rows_in_partial_query_block_are_zero(run, dtype):
+    # Rows 48 and 49 form the partial last query block of Lq = 50.
+    shape = (1, 2, TAIL_QUERY_LENGTH, TAIL_KEY_LENGTH)
+    q, k, v, bias = _random_inputs(shape, seed=14, bias_shape=shape)
+    bias[0, 0, 49, :] = -np.inf
+    bias[0, 1, 48, :] = -np.inf
+    bias[0, 1, 49, : TAIL_KEY_LENGTH // 2] = -np.inf
+    actual, _, _ = _check(run, [q, k, v, bias], dtype)
+    np.testing.assert_array_equal(actual[0, 0, 49], 0)
+    np.testing.assert_array_equal(actual[0, 1, 48], 0)
+    assert np.any(actual[0, 0, 48] != 0)
+    assert np.any(actual[0, 1, 49] != 0)
 
 
 @pytest.mark.metal

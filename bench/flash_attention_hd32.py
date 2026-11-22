@@ -35,8 +35,8 @@ for _path in (_REPO / "python" / "src", _REPO):
         sys.path.insert(0, str(_path))
 
 from bench.record import (  # noqa: E402
-    _percentile,
     add_record_arguments,
+    percentile,
     record_if_requested,
     validate_record_arguments,
 )
@@ -70,8 +70,8 @@ def summarize(samples: list[float], flops: int) -> dict:
     median = statistics.median(values)
     return {
         "median_ms": median,
-        "p10_ms": _percentile(values, 0.1),
-        "p90_ms": _percentile(values, 0.9),
+        "p10_ms": percentile(values, 0.1),
+        "p90_ms": percentile(values, 0.9),
         "tflops": flops / (median * 1e9),
     }
 

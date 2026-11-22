@@ -50,6 +50,7 @@ The bias is optional and additive, and is added after scaling. A `-inf` bias mas
   - `(B, H, Lq, Lk)` = `(1, 1, 1, 1)`, `(1, 2, 5, 7)`, `(2, 3, 17, 33)`, `(1, 8, 64, 64)`, `(1, 2, 9, 100)` and `(1, 2, 9, 1000)`
   - bias that is full, per key, per (query, key), per (batch, query) and a scalar, at `Lk` = 7, 100 and 1000, with every third bias element `-inf`
   - fully `-inf`-masked rows, which must be exactly zero
+  - tail blocks: `Lq = 50` (not a multiple of 16) and `Lk = 5184 + 17` (not a multiple of 64), alone and together, with a full bias, and with fully `-inf`-masked rows inside the partial last query block
   - an explicit scale, large scores and a single key
   - bf16 only: the encoder shape `(1, 8, 5184, 5184)`, and the decoder cross-attention shape `(1, 8, 201, 5184)` with and without a full bias
 
