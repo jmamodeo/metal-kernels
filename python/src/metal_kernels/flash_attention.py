@@ -6,7 +6,9 @@
 MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
-Version 0 is the simple per-row online-softmax kernel: correct, not tuned.
+Version 1 is the tiled ``simdgroup_matrix`` kernel from the design note:
+one threadgroup of two simdgroups per 16 query rows of one (batch, head),
+K/V walked in 64-key blocks staged through threadgroup memory.
 """
 
 from __future__ import annotations
@@ -19,22 +21,32 @@ from metal_kernels.loader import metal_source
 
 KERNEL_NAME = "flash_attention_hd32"
 HEAD_DIM = 32
-THREADGROUP_SIZE = 256
+QUERY_BLOCK = 16
+KEY_BLOCK = 64
+THREADGROUP_SIZE = 64
+# K and V blocks staged as fp32 in threadgroup memory.
+THREADGROUP_MEMORY_BYTES = 2 * KEY_BLOCK * HEAD_DIM * 4
 BACKENDS = ("mlx", "mps")
 
 # Buffer offsets in the shader are 32-bit, and MLX grids are 32-bit ints.
 _MAX_ELEMENTS = 2**31 - 1
 
-# The MLX-generated kernel calls the row function in the shared source.
+# The MLX-generated kernel declares the threadgroup tiles and calls the block
+# function in the shared source.
 _MLX_BODY = """
-    flash_attention_hd32_row(
+    threadgroup float fa_k_tile[FA_HD32_TILE_ELEMENTS];
+    threadgroup float fa_v_tile[FA_HD32_TILE_ELEMENTS];
+    flash_attention_hd32_block(
         fa_hd32_bits(q),
         fa_hd32_bits(k),
         fa_hd32_bits(v),
         fa_hd32_bits(bias),
         fa_hd32_bits(out),
         fa_hd32_params(dims, scale[0]),
-        thread_position_in_grid.x);
+        fa_k_tile,
+        fa_v_tile,
+        threadgroup_position_in_grid.x,
+        thread_index_in_threadgroup);
 """
 
 
@@ -68,8 +80,9 @@ def launch_geometry(
     """Validate shapes and return ``(dims, threads, threadgroup)``.
 
     ``dims`` is ``(batch * heads * query_length, heads, query_length,
-    key_length)``. ``threads`` is the 1-D grid size in threads (32 per query
-    row) and ``threadgroup`` the threadgroup size in threads.
+    key_length)``. ``threads`` is the 1-D grid size in threads: one
+    threadgroup of ``THREADGROUP_SIZE`` threads per ``QUERY_BLOCK`` query
+    rows of each (batch, head). ``threadgroup`` is the threadgroup size.
     """
     q_shape, k_shape, v_shape = tuple(q_shape), tuple(k_shape), tuple(v_shape)
     if len(q_shape) != 4 or len(k_shape) != 4 or len(v_shape) != 4:
@@ -86,11 +99,11 @@ def launch_geometry(
         raise ValueError("batch, heads, and sequence lengths must be positive")
 
     rows = batch * heads * query_length
-    threads = rows * HEAD_DIM
-    if max(threads, batch * heads * key_length * HEAD_DIM) > _MAX_ELEMENTS:
+    if max(rows, batch * heads * key_length) * HEAD_DIM > _MAX_ELEMENTS:
         raise ValueError(f"inputs must have at most {_MAX_ELEMENTS} elements")
-    threadgroup = min(THREADGROUP_SIZE, threads)
-    return (rows, heads, query_length, key_length), threads, threadgroup
+    groups = batch * heads * -(-query_length // QUERY_BLOCK)
+    threads = groups * THREADGROUP_SIZE
+    return (rows, heads, query_length, key_length), threads, THREADGROUP_SIZE
 
 
 def bias_strides(

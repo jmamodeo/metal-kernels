@@ -18,6 +18,8 @@ import pytest
 from metal_kernels import list_kernels, metal_source
 from metal_kernels.flash_attention import (
     KERNEL_NAME,
+    QUERY_BLOCK,
+    THREADGROUP_MEMORY_BYTES,
     THREADGROUP_SIZE,
     bias_strides,
     flash_attention_hd32,
@@ -52,7 +54,15 @@ def test_kernel_is_registered(monkeypatch):
     assert '[[host_name("flash_attention_hd32_" #NAME)]]' in source
     assert "FA_HD32_INSTANTIATE(bfloat, ushort)" in source
     assert "FA_HD32_INSTANTIATE(float, float)" in source
-    assert "inline void flash_attention_hd32_row(" in source
+    assert "inline void flash_attention_hd32_block(" in source
+    assert "constant constexpr uint FA_HD32_BLOCK_Q = 16;" in source
+    assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
+
+
+def test_launch_constants_match_the_shader():
+    # 16 query rows per threadgroup, 8 per simdgroup: two simdgroups.
+    assert (QUERY_BLOCK, THREADGROUP_SIZE) == (16, 64)
+    assert THREADGROUP_MEMORY_BYTES == 2 * 64 * 32 * 4
 
 
 def test_import_does_not_load_gpu_frameworks():
@@ -78,10 +88,11 @@ def test_backend_is_keyword_only():
 @pytest.mark.parametrize(
     ("shape", "expected"),
     [
-        ((1, 1, 1, 1), ((1, 1, 1, 1), 32, 32)),
-        ((1, 2, 5, 7), ((10, 2, 5, 7), 320, 256)),
-        (SAM3_ENCODER, ((41472, 8, 5184, 5184), 41472 * 32, THREADGROUP_SIZE)),
-        (SAM3_CROSS, ((1608, 8, 201, 5184), 1608 * 32, THREADGROUP_SIZE)),
+        ((1, 1, 1, 1), ((1, 1, 1, 1), 64, 64)),
+        ((1, 2, 5, 7), ((10, 2, 5, 7), 128, 64)),
+        ((2, 3, 17, 33), ((102, 3, 17, 33), 6 * 2 * 64, 64)),
+        (SAM3_ENCODER, ((41472, 8, 5184, 5184), 8 * 324 * 64, THREADGROUP_SIZE)),
+        (SAM3_CROSS, ((1608, 8, 201, 5184), 8 * 13 * 64, THREADGROUP_SIZE)),
     ],
 )
 def test_launch_geometry(shape, expected):
@@ -90,7 +101,7 @@ def test_launch_geometry(shape, expected):
     kv_shape = (batch, heads, key_length, 32)
     dims, threads, threadgroup = launch_geometry(q_shape, kv_shape, kv_shape)
     assert (dims, threads, threadgroup) == expected
-    assert threads % 32 == 0 and threadgroup % 32 == 0
+    assert threads % threadgroup == 0 and threadgroup % 32 == 0
 
 
 def test_launch_geometry_rejects_bad_shapes():

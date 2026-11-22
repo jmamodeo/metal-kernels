@@ -17,7 +17,7 @@ Results are appended through ``bench/record.py`` only with ``--record``.
 Run on Apple silicon from the repository root:
 
     python bench/flash_attention_hd32.py
-    python bench/flash_attention_hd32.py --record --version v0 --design "TEXT"
+    python bench/flash_attention_hd32.py --record --version v1 --design "TEXT"
 """
 
 from __future__ import annotations
@@ -137,7 +137,13 @@ def main(argv: list[str] | None = None) -> int:
     import numpy as np
     import torch
     import torch.nn.functional as functional
-    from metal_kernels.flash_attention import flash_attention_hd32, launch_geometry
+    from metal_kernels.flash_attention import (
+        KEY_BLOCK,
+        QUERY_BLOCK,
+        THREADGROUP_MEMORY_BYTES,
+        flash_attention_hd32,
+        launch_geometry,
+    )
 
     if not torch.backends.mps.is_available():
         print("PyTorch MPS is not available.", file=sys.stderr)
@@ -265,8 +271,10 @@ def main(argv: list[str] | None = None) -> int:
         launch_config={
             "threads": threads,
             "threadgroup": threadgroup,
-            "rows_per_simdgroup": 1,
-            "threadgroup_memory_bytes": 0,
+            "query_block": QUERY_BLOCK,
+            "key_block": KEY_BLOCK,
+            "rows_per_simdgroup": 8,
+            "threadgroup_memory_bytes": THREADGROUP_MEMORY_BYTES,
         },
     )
     if record is not None:

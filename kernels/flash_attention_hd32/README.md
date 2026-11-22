@@ -4,9 +4,9 @@ Fused scaled dot-product attention for head dim 32, written for the SAM 3 detect
 
 ## Status
 
-Version 0: a simple per-row online-softmax kernel with MLX and PyTorch MPS launchers. Its job is to show that the bf16 and fp32 bindings, the bias path and both launch paths are correct. It has no speed target. Version 1, the tiled `simdgroup_matrix` kernel from the design note, replaces the shader body later and keeps this interface.
+Version 1: the tiled `simdgroup_matrix` kernel from the design note. It replaces the v0 per-row shader body and keeps the v0 interface: the same Python API, buffers, `dims` layout, bias semantics and tolerances. Target: the MLX path under 9.74 ms/call at `[1, 8, 5184, 32]` bf16 (MLX's unfused SDPA), goal about 6 ms.
 
-The `metal` tests have not been run on the M3 Max for v0 yet, and no v0 benchmark run is recorded. `bench/run_mac.sh v0` does both.
+Version 0, the per-row online-softmax kernel (one simdgroup per query row), passed the `metal` tests on the M3 Max. The v1 `metal` tests and benchmark have not been run on the M3 Max yet, and no v1 run is recorded. `bench/run_mac.sh v1` does both.
 
 ## What it computes
 
@@ -33,13 +33,14 @@ The bias is optional and additive, and is added after scaling. A `-inf` bias mas
 
 ## Threadgroup assumptions
 
-- Grid size: 1-D, `batch · heads · query_length · 32` threads. One simdgroup per query row.
-- Threadgroup size: `min(256, grid)`. It must be a multiple of 32 so each simdgroup maps to one row.
-- Threadgroup memory: none.
-- Layout: row-major contiguous `(…, sequence, 32)`. Lane `i` of a simdgroup owns head-dim column `i`, so each K/V row is one 64-byte (bf16) or 128-byte (fp32) load per simdgroup.
-- Edge behavior: none needed. Every thread in the grid is a valid `(row, column)`, and any key length works, including tails that are not a multiple of 64. A row guard is kept for safety. Each tensor is limited to fewer than 2³¹ elements because offsets are 32-bit.
-- Math: bf16 is widened to fp32 by bit placement. Dot products use `simd_sum`. The scale and bias are folded into `log2(e)` so softmax uses `exp2`. `-inf` is detected from the bits, so fast math cannot fold the test away, and no infinity is used in arithmetic. O is rescaled only when the max rises.
-- Entry points: PyTorch MPS calls `flash_attention_hd32_bfloat` or `flash_attention_hd32_float`. MLX passes this file as `header` and calls `flash_attention_hd32_row` from its generated kernel body.
+- Grid size: 1-D, `batch · heads · ceil(query_length / 16) · 64` threads. One threadgroup per (batch · head, 16-query block): 2592 threadgroups at `[1, 8, 5184, 32]`.
+- Threadgroup size: exactly 64 threads (`FA_HD32_THREADS`), two simdgroups. Simdgroup `s` owns query rows `[8s, 8s + 8)` of the block.
+- Threadgroup memory: 16 KB. One 64-key K block and one V block, `64 × 32` fp32 each (`FA_HD32_TILE_ELEMENTS` floats per array), declared by the kernel entry point (MPS) or the generated body (MLX) and passed in.
+- Tiles: all math is on 8×8 `simdgroup_float8x8`. Q (pre-scaled by `scale · log2 e`) and the O accumulator stay in registers as four tiles each across D = 32. Per 64-key block, `S = Q · Kᵀ` is eight tiles (Kᵀ is a transposed `simdgroup_load` from the K block), then `O += P · V`. The row max and sum use `simd_shuffle_xor` with lane masks 1 and 8, which relies on the Apple 8×8 lane layout that metal-flash-attention and MLX also use (`fa_hd32_tile_coord`).
+- Layout: row-major contiguous `(…, sequence, 32)`. Each K/V block is one contiguous span, loaded by the 64 threads with consecutive addresses.
+- Edge behavior: any query length and any key length work. Keys past `key_length` in the last block are zero-filled in threadgroup memory and get `p = 0`; query rows past `query_length` in the last block compute on zeros, never read the bias and are not stored. Each tensor is limited to fewer than 2³¹ elements because offsets are 32-bit.
+- Math: bf16 is widened to fp32 by bit placement. The scale and bias are folded into `log2(e)` so softmax uses `exp2`. `-inf` is detected from the bits, so fast math cannot fold the test away, and no infinity is used in arithmetic: the running max starts at the finite `-FLT_MAX`, masked keys are excluded with a per-element flag rather than a sentinel score, and the rescale exponent is clamped to `-FLT_MAX`. O and the running sum are multiplied by `exp2(m_old − m_new)` every block, which is exactly 1 when the max does not rise.
+- Entry points: PyTorch MPS calls `flash_attention_hd32_bfloat` or `flash_attention_hd32_float`. MLX passes this file as `header` and calls `flash_attention_hd32_block` from its generated kernel body.
 
 ## Numerical check
 
