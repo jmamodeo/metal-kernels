@@ -28,8 +28,9 @@ reference = ["numpy>=1.24"]
 dev = ["numpy>=1.24", "pytest>=7"]
 # Mac-only. mlx and the default PyTorch wheel have no Linux MPS build.
 # NumPy is required: without it PyTorch warns "Failed to initialize NumPy"
-# and the shape profiler cannot import it.
-mac = ["torch", "mlx", "numpy>=1.24"]
+# and the shape profiler cannot import it. pytest runs the metal tests in
+# bench/run_mac.sh.
+mac = ["torch", "mlx", "numpy>=1.24", "pytest>=7"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -4,9 +4,31 @@ Benchmark scripts land here next to the kernel they measure. Each one times
 that kernel against the built-in framework op (MPS, MLX, or Metal Performance
 Shaders) on a named machine, shape, and dtype.
 
-`run.py` prints the registry and does not record timings. There is no kernel
-benchmark script yet. FlashAttention hd32 v0 is a correctness version; its
-benchmark is step 4 of that kernel.
+`run.py` prints the registry and does not record timings.
+
+## FlashAttention hd32
+
+`flash_attention_hd32.py` times four variants on the same bf16 inputs at
+`[1, 8, 5184, 32]`: our kernel through MLX and through PyTorch MPS,
+`mx.fast.scaled_dot_product_attention`, and
+`torch.nn.functional.scaled_dot_product_attention` on MPS. It prints median,
+p10 and p90 ms per call and TFLOP/s (FLOPs = `4 * B * H * Lq * Lk * D`), plus
+the max and mean abs error of each variant against `sdpa_reference` in fp32 on
+the bf16-rounded inputs. A kernel passes when it is within `rtol = 2e-2`,
+`atol = 1e-2` of both the reference and the built-in, and its max abs error is
+no larger than PyTorch MPS SDPA's. The recorded `bytes_per_call` is the
+compulsory traffic (q, k and v read once, O written once) for every variant.
+
+On the Mac, one command installs the `mac` extra, runs `pytest -m metal`, runs
+the benchmark with `--record --version <version>`, and prints the git SHA:
+
+```bash
+bench/run_mac.sh v0
+```
+
+It uses `./.venv` when present. Later versions pass their design text as a
+second argument: `bench/run_mac.sh v1 "TEXT"`. The script appends to
+`bench/results/flash_attention_hd32.jsonl` and commits nothing.
 
 ## Recording kernel versions
 
