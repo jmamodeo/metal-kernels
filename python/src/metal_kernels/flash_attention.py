@@ -30,9 +30,6 @@ HEAD_DIM = 32
 QUERY_BLOCK = 32
 KEY_BLOCK = 64
 THREADGROUP_SIZE = QUERY_BLOCK // 8 * 32
-# Two buffers of one 64-key K block and one V block in bf16, or one buffer
-# in fp32: 16 KB for either dtype. Mirrors FA_HD32_KV_BYTES in the shader.
-THREADGROUP_MEMORY_BYTES = 2 * 2 * KEY_BLOCK * HEAD_DIM * 2
 BACKENDS = ("mlx", "mps")
 
 # Buffer offsets in the shader are 32-bit, and MLX grids are 32-bit ints.

@@ -17,8 +17,6 @@ final class FlashAttentionHD32Tests: XCTestCase {
         XCTAssertTrue(source.contains("FA_HD32_HEAD_DIM = \(FlashAttentionHD32.headDim);"))
         XCTAssertTrue(source.contains("FA_HD32_DIM_COUNT = \(FlashAttentionHD32.dimCount),"))
         XCTAssertEqual(FlashAttentionHD32.threadgroupSize, 128)
-        XCTAssertEqual(FlashAttentionHD32.threadgroupMemoryBytes, 16384)
-        XCTAssertTrue(source.contains("FA_HD32_KV_BYTES = 2 * FA_HD32_BUFFER_ELEMENTS * 2;"))
         for dtype in FlashAttentionDType.allCases {
             let name = dtype.functionName.dropFirst("flash_attention_hd32_".count)
             XCTAssertTrue(source.contains("FA_HD32_INSTANTIATE(\(name), "), dtype.functionName)

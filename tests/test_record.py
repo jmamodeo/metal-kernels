@@ -112,6 +112,34 @@ def test_record_includes_baseline_and_speed_gate(tmp_path, monkeypatch, inputs):
     data = record.append_record("attention", directory=tmp_path, **inputs)
     assert data["speed_gate"] == {"mlx": True, "mps": True}
     assert len((tmp_path / "attention.jsonl").read_text().splitlines()) == 2
+    assert data["gate_rule"] is None
+    # A caller-supplied rule replaces speed_gate and is described in the record.
+    inputs["timings"]["mps"]["kernel"] = [3.3, 4.4]
+    data = record.append_record(
+        "attention",
+        directory=tmp_path,
+        gate=record.ratio_bound_gate(1.01),
+        gate_rule="upper bound <= 1.01",
+        **inputs,
+    )
+    assert data["speed_gate"] == {"mlx": True, "mps": False}
+    assert data["gate_rule"] == "upper bound <= 1.01"
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "no_slower", "bounded"),
+    [
+        (0.95, 0.99, True, True),  # entirely below 1
+        (0.99, 1.005, True, True),  # includes 1
+        (1.0, 1.01, True, True),  # touches 1 and the bound
+        (1.002, 1.009, False, True),  # above 1, within 1.01
+        (1.005, 1.02, False, False),  # above both
+    ],
+)
+def test_no_slower_and_ratio_bound_gates(low, high, no_slower, bounded):
+    ratio = {"ci_low": low, "ci_high": high}
+    assert record.no_slower_gate(ratio) is no_slower
+    assert record.ratio_bound_gate(1.01)(ratio) is bounded
 
 
 def test_record_rejects_mismatched_baseline(tmp_path, inputs):

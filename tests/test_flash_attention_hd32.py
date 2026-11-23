@@ -21,7 +21,6 @@ from metal_kernels.flash_attention import (
     KERNEL_NAME,
     KEY_BLOCK,
     QUERY_BLOCK,
-    THREADGROUP_MEMORY_BYTES,
     THREADGROUP_SIZE,
     bias_strides,
     flash_attention_hd32,
@@ -65,9 +64,8 @@ def test_launch_constants_match_the_shader():
     # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. Two
     # buffers of one 64-key K block and one V block are staged in bf16, or
     # one buffer in fp32, and shared by them: 16 KB for either dtype.
-    assert (QUERY_BLOCK, THREADGROUP_SIZE) == (32, 128)
-    assert THREADGROUP_MEMORY_BYTES == 2 * 2 * KEY_BLOCK * 32 * 2 == 16384
-    assert THREADGROUP_MEMORY_BYTES == 1 * 2 * KEY_BLOCK * 32 * 4
+    # The shader declares the stage statically; no host sets its size.
+    assert (QUERY_BLOCK, KEY_BLOCK, THREADGROUP_SIZE) == (32, 64, 128)
     source = metal_source(KERNEL_NAME)
     assert "constant constexpr uint FA_HD32_BUFFER_ELEMENTS = 2 * FA_HD32_BLOCK_ELEMENTS;" in source
     assert "constant constexpr uint FA_HD32_KV_BYTES = 2 * FA_HD32_BUFFER_ELEMENTS * 2;" in source

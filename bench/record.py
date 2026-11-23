@@ -12,6 +12,7 @@ import re
 import statistics
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
@@ -132,6 +133,24 @@ def speed_gate(ratio_ci: dict) -> bool:
     return ratio_ci["ci_high"] < 1
 
 
+def no_slower_gate(ratio_ci: dict) -> bool:
+    """Whether a candidate is not measurably slower than the baseline in one run.
+
+    Passes when the :func:`median_ratio_ci` of candidate over baseline
+    includes 1 or lies entirely below it.
+    """
+    return ratio_ci["ci_low"] <= 1
+
+
+def ratio_bound_gate(limit: float) -> Callable[[dict], bool]:
+    """A gate that passes when the ratio CI's upper bound is at most ``limit``."""
+
+    def gate(ratio_ci: dict) -> bool:
+        return ratio_ci["ci_high"] <= limit
+
+    return gate
+
+
 def _timing(samples, flops: int, bytes_per_call: int) -> dict:
     if not math.isfinite(bytes_per_call) or bytes_per_call <= 0:
         raise ValueError("bytes per call must be positive and finite")
@@ -163,6 +182,8 @@ def append_record(
     timings: dict,
     correctness: dict,
     launch_config: dict | None = None,
+    gate: Callable[[dict], bool] = speed_gate,
+    gate_rule: str | None = None,
     directory: Path = RESULTS,
 ) -> dict:
     """Append a run; timings and correctness are keyed by framework.
@@ -176,7 +197,8 @@ def append_record(
     ``ratio_vs_builtin``, the :func:`median_ratio_ci` of kernel over built-in,
     which is reported only. With a baseline, it also gains
     ``speedup_vs_baseline`` and ``ratio_vs_baseline``, and the record's
-    ``speed_gate`` maps the framework to the :func:`speed_gate` result.
+    ``speed_gate`` maps the framework to ``gate(ratio_vs_baseline)``
+    (:func:`speed_gate` by default); ``gate_rule`` describes that rule.
     ``speed_gate`` is ``None`` when no framework has a baseline.
     Correctness entries contain ``reference`` and ``builtin`` error dicts
     (``max_abs_error``, ``mean_abs_error``), ``rtol``, ``atol``, and ``passed``.
@@ -238,7 +260,7 @@ def append_record(
             )
             ratio = median_ratio_ci(samples["kernel"], samples[BASELINE])
             kernel_timing["ratio_vs_baseline"] = ratio
-            gates[framework] = speed_gate(ratio)
+            gates[framework] = bool(gate(ratio))
     commit, dirty = _git()
     record = {
         "recorded_at": datetime.now(timezone.utc).isoformat(),
@@ -253,6 +275,7 @@ def append_record(
         "variants": variants,
         "correctness": checks,
         "speed_gate": gates or None,
+        "gate_rule": gate_rule,
         "launch_config": launch_config,
     }
     line = json.dumps(record, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
