@@ -35,19 +35,18 @@ jobs:
           python3 -m ruff format --check .
 
       - name: Pytest
-        # Hosted macOS runners typically do not expose a Metal GPU, so
-        # Metal execution tests skip. tests/conftest.py skips tests marked
-        # `metal` when metal_device_available() is false (non-macOS, or
-        # macOS with no default Metal device). This job does not install
-        # MLX or PyTorch; tests that import those packages skip via
-        # importorskip. Tolerances and the tests themselves are unchanged.
+        # tests/conftest.py skips tests marked `metal` when
+        # metal_device_available() is false (non-macOS, or macOS with no
+        # default Metal device). This macos-26 arm64 runner does have a
+        # Metal device. This job does not install MLX or PyTorch, so the
+        # Python Metal tests skip via importorskip. Tolerances and the
+        # tests themselves are unchanged.
         run: pytest
 
       - name: Swift
-        # GPU-launching XCTest cases already throw XCTSkip when
-        # MTLCreateSystemDefaultDevice() is nil. Hosted runners usually
-        # have no Metal GPU, so those cases skip; compile and non-device
-        # tests still run.
+        # GPU-launching XCTest cases throw XCTSkip when
+        # MTLCreateSystemDefaultDevice() is nil. On this runner a Metal
+        # device is available, so those cases run.
         run: |
           swift build
           swift test
