@@ -17,7 +17,9 @@ import numpy as np
 import pytest
 from metal_kernels import list_kernels, metal_source
 from metal_kernels.flash_attention import (
+    _MLX_BODY,
     KERNEL_NAME,
+    KEY_BLOCK,
     QUERY_BLOCK,
     THREADGROUP_MEMORY_BYTES,
     THREADGROUP_SIZE,
@@ -60,13 +62,15 @@ def test_kernel_is_registered(monkeypatch):
 
 
 def test_launch_constants_match_the_shader():
-    # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. K and
-    # V go straight to registers, so no threadgroup memory.
+    # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. One
+    # 64-key K block and one V block are staged in bf16 and shared by them.
     assert (QUERY_BLOCK, THREADGROUP_SIZE) == (32, 128)
-    assert THREADGROUP_MEMORY_BYTES == 0
+    assert THREADGROUP_MEMORY_BYTES == 2 * KEY_BLOCK * 32 * 2 == 8192
     source = metal_source(KERNEL_NAME)
-    assert "threadgroup float" not in source
-    assert "threadgroup_barrier" not in source
+    assert "constant constexpr uint FA_HD32_KV_ELEMENTS = 2 * FA_HD32_BLOCK_ELEMENTS;" in source
+    assert "threadgroup T kv[FA_HD32_KV_ELEMENTS];" in source
+    assert "threadgroup_barrier(mem_flags::mem_threadgroup)" in source
+    assert "FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));" in _MLX_BODY
 
 
 def test_import_does_not_load_gpu_frameworks():

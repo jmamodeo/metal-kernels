@@ -111,7 +111,7 @@ order, and hold `median_ratio`, `ci_low`, `ci_high`, `level`, `resamples`,
 `seed` and `pairs`.
 `shape` and the optional `launch_config` are JSON-serializable dictionaries;
 the latter can capture query/key blocks, threads, and threadgroup memory
-(`threadgroup_memory_bytes` is 0 for `flash_attention_hd32`, which uses none).
+(`threadgroup_memory_bytes` is 8192 for `flash_attention_hd32`, its bf16 K/V stage).
 
 `correctness` is keyed by the same frameworks. Each entry contains
 `reference` and `builtin` dictionaries with `max_abs_error` and
