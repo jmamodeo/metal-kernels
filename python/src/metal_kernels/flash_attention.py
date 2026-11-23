@@ -10,9 +10,10 @@ Version 7.1 is the current kernel: the tiled ``simdgroup_matrix`` kernel
 from the design note, one threadgroup of four simdgroups per 32 query
 rows of one (batch, head), with each 64-key K/V block copied once into
 threadgroup memory, in the input dtype, and shared by the four simdgroups.
-The next block's device loads are issued before the current block's math.
-For bf16 the stage is double buffered, with one barrier per block; for
-fp32 it is a single buffer, with two barriers per block.
+For bf16 the stage is double buffered: the next block's device loads
+are issued before the current block's math, with one barrier per block.
+For fp32 the kernel uses v6's loop: a single buffer and no prefetch,
+with two barriers per block.
 """
 
 from __future__ import annotations
