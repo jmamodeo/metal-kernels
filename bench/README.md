@@ -56,11 +56,11 @@ On the Mac, one command installs the `mac` extra, runs `pytest -m metal`, runs
 the benchmark with `--record --version <version>`, and prints the git SHA:
 
 ```bash
-bench/run_mac.sh v6
+bench/run_mac.sh v7
 ```
 
-It uses `./.venv` when present. The current kernel is v6. `v0`, `v1` and `v6`
-have a default design text; other versions pass theirs as a second argument:
+It uses `./.venv` when present. The current kernel is v7. `v0`, `v1`, `v6` and
+`v7` have a default design text; other versions pass theirs as a second argument:
 `bench/run_mac.sh v3 "TEXT"`. The script appends to
 `bench/results/flash_attention_hd32.jsonl` and commits nothing.
 
@@ -112,7 +112,7 @@ order, and hold `median_ratio`, `ci_low`, `ci_high`, `level`, `resamples`,
 `seed` and `pairs`.
 `shape` and the optional `launch_config` are JSON-serializable dictionaries;
 the latter can capture query/key blocks, threads, and threadgroup memory
-(`threadgroup_memory_bytes` is 8192 for `flash_attention_hd32`, its bf16 K/V stage).
+(`threadgroup_memory_bytes` is 16384 for `flash_attention_hd32`, its double-buffered bf16 K/V stage).
 
 `correctness` is keyed by the same frameworks. Each entry contains
 `reference` and `builtin` dictionaries with `max_abs_error` and

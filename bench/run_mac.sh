@@ -31,6 +31,9 @@ case "$version" in
     v6)
         default_design="v1 tiling (32 query rows, 4 simdgroups x 8 rows, 64-key blocks, bf16 simdgroup_matrix inputs, fp32 P and accumulators, always-applied exp2 correction) with each K/V block loaded once by all 128 threads into 8 KB of bf16 threadgroup memory shared by the 4 simdgroups, zero-filled past key_length, barrier after the load and before the next block"
         ;;
+    v7)
+        default_design="v6 with the K/V stage double buffered in 16 KB of bf16 threadgroup memory: the next 64-key block's device loads are issued into registers before the current block's math and stored into the other buffer after it, one barrier per block instead of two"
+        ;;
     *)
         default_design=""
         ;;
