@@ -341,7 +341,9 @@ def _run_mlx_case(mx, nn, case: dict, warmup: int, iters: int) -> dict:
                 bias=True,
             )
             _cast_mlx_module(layer, dtype)
-            inputs = mx.random.normal(shape=(case["input"][0], spatial[0], spatial[1], channels_in)).astype(dtype)
+            inputs = mx.random.normal(
+                shape=(case["input"][0], spatial[0], spatial[1], channels_in)
+            ).astype(dtype)
 
             def fn():
                 mx.eval(layer(inputs))
@@ -359,7 +361,9 @@ def _run_mlx_case(mx, nn, case: dict, warmup: int, iters: int) -> dict:
                 bias=True,
             )
             _cast_mlx_module(layer, dtype)
-            inputs = mx.random.normal(shape=(case["input"][0], spatial[0], spatial[1], channels_in)).astype(dtype)
+            inputs = mx.random.normal(
+                shape=(case["input"][0], spatial[0], spatial[1], channels_in)
+            ).astype(dtype)
 
             def fn():
                 mx.eval(layer(inputs))
@@ -407,9 +411,13 @@ def run_cases(cases, device: str, warmup: int, iters: int, backends: set[str]) -
         import torch as torch_mod
 
         torch = torch_mod
-        if device == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        if device == "mps" and not (
+            hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        ):
             for case in cases:
-                rows.append(_skip_row(case, "pytorch", "MPS is not available in this PyTorch build."))
+                rows.append(
+                    _skip_row(case, "pytorch", "MPS is not available in this PyTorch build.")
+                )
             torch = None
             device = ""
     if torch is not None:
@@ -461,7 +469,9 @@ def write_summary(path: Path, rows: list[dict], device: str, full_forward: str) 
         lines.append("None recorded.")
     else:
         for row in problems:
-            lines.append(f"- `{row['case']}` / {row['backend']}: {row['status']}. {row['fallback'] or row['detail']}")
+            lines.append(
+                f"- `{row['case']}` / {row['backend']}: {row['status']}. {row['fallback'] or row['detail']}"
+            )
     skipped = [row for row in rows if row["status"] == "skipped"]
     if skipped:
         lines.extend(["", "## Skipped", ""])
@@ -481,7 +491,9 @@ def time_full_forward(device: str) -> str:
         from PIL import Image
 
         torch.manual_seed(0)
-        model = build_image_model(load_from_HF=False, enable_inst_interactivity=False, eval_mode=True)
+        model = build_image_model(
+            load_from_HF=False, enable_inst_interactivity=False, eval_mode=True
+        )
         from sam3.model.sam3_image_processor import Sam3Processor
 
         processor = Sam3Processor(model, device=device)
@@ -508,8 +520,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, default=Path("bench/sam3_shapes/output"))
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)
-    parser.add_argument("--device", default="mps", help="PyTorch device. Use cpu only for --self-check.")
-    parser.add_argument("--self-check", action="store_true", help="Time one tiny CPU linear and exit.")
+    parser.add_argument(
+        "--device", default="mps", help="PyTorch device. Use cpu only for --self-check."
+    )
+    parser.add_argument(
+        "--self-check", action="store_true", help="Time one tiny CPU linear and exit."
+    )
     parser.add_argument("--list", action="store_true", help="Print the cases and exit.")
     parser.add_argument("--skip-mlx", action="store_true")
     parser.add_argument("--skip-pytorch", action="store_true")

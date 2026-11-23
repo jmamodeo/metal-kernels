@@ -319,7 +319,9 @@ def _patch_torch() -> None:
 
     def _tensor_cuda(self, device=None, non_blocking=False, memory_format=torch.preserve_format):
         if _state.device.type == "cuda":
-            return original_cuda(self, device=device, non_blocking=non_blocking, memory_format=memory_format)
+            return original_cuda(
+                self, device=device, non_blocking=non_blocking, memory_format=memory_format
+            )
         _state.cuda_calls += 1
         return self.to(device=_state.device, memory_format=memory_format)
 
@@ -402,9 +404,13 @@ def _linear_gelu(activation, linear, mat1):
     weight = linear.weight.detach().to(torch.bfloat16)
     bias = None if linear.bias is None else linear.bias.detach().to(torch.bfloat16)
     hidden = F.linear(mat1.to(torch.bfloat16), weight, bias)
-    if activation in (F.relu, nn.ReLU) or (isinstance(activation, type) and issubclass(activation, nn.ReLU)):
+    if activation in (F.relu, nn.ReLU) or (
+        isinstance(activation, type) and issubclass(activation, nn.ReLU)
+    ):
         return F.relu(hidden)
-    if activation in (F.gelu, nn.GELU) or (isinstance(activation, type) and issubclass(activation, nn.GELU)):
+    if activation in (F.gelu, nn.GELU) or (
+        isinstance(activation, type) and issubclass(activation, nn.GELU)
+    ):
         return F.gelu(hidden)
     raise ValueError(f"Unexpected activation {activation}")
 
@@ -488,7 +494,9 @@ def _patch_processor(module) -> None:
     _note("sam3.model.sam3_image_processor")
 
 
-def _patch_autocast_methods(module_name: str, class_name: str, method_names: tuple[str, ...]) -> None:
+def _patch_autocast_methods(
+    module_name: str, class_name: str, method_names: tuple[str, ...]
+) -> None:
     module = sys.modules.get(module_name)
     if module is None:
         return

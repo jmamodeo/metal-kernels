@@ -211,7 +211,9 @@ def test_patched_image_and_tracker_match_fused_reference():
     compat.install(device="cpu", mlp="fused")
     torch.manual_seed(0)
     torch.set_num_threads(1)
-    model = compat.build_image_model(load_from_HF=False, enable_inst_interactivity=False, eval_mode=True)
+    model = compat.build_image_model(
+        load_from_HF=False, enable_inst_interactivity=False, eval_mode=True
+    )
     assert model.training is False
     image = Image.new("RGB", (1008, 1008), (120, 40, 10))
     before = compat.stats()["factory_redirects"]
