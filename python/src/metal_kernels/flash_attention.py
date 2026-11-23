@@ -6,9 +6,9 @@
 MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
-Version 1 is the tiled ``simdgroup_matrix`` kernel from the design note:
+Version 2 is the tiled ``simdgroup_matrix`` kernel from the design note:
 one threadgroup of four simdgroups per 32 query rows of one (batch, head),
-K/V walked in 64-key blocks loaded straight from device memory into
+K/V walked in 128-key blocks loaded straight from device memory into
 registers, with no threadgroup memory.
 """
 
@@ -25,7 +25,7 @@ HEAD_DIM = 32
 # Mirrors FA_HD32_BLOCK_Q, FA_HD32_BLOCK_K and FA_HD32_THREADS in the shader:
 # 8 query rows per simdgroup, 32 threads per simdgroup.
 QUERY_BLOCK = 32
-KEY_BLOCK = 64
+KEY_BLOCK = 128
 THREADGROUP_SIZE = QUERY_BLOCK // 8 * 32
 # K and V go straight from device memory to registers.
 THREADGROUP_MEMORY_BYTES = 0

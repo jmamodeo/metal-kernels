@@ -41,7 +41,7 @@ Fused FlashAttention-style scaled dot-product attention for head dim 32. The SAM
 | Step | Status |
 | --- | --- |
 | 1. NumPy reference | done: `reference/sdpa.py` |
-| 2. Metal kernel from Python | v0 (per-row online softmax, bias, bf16 and fp32, MLX and MPS launchers) done and passing the `metal` tests on the M3 Max. v1 (tiled simdgroup) in review: the first revision passed the `metal` tests on the M3 Max but missed the speed bar; the revised kernel is not yet run |
+| 2. Metal kernel from Python | v0 (per-row online softmax, one simdgroup per query row, bias, bf16 and fp32, MLX and MPS launchers) done and passing the `metal` tests on the M3 Max. v1 (tiled simdgroup) merged: its first revision (16-row threadgroups, K/V staged as fp32 in 16 KB of threadgroup memory, fp32 GEMMs) passed the `metal` tests but ran at 40.0 ms against MLX SDPA's 8.40 ms; the merged revision (32 query rows, 128 threads, device-to-register K/V, bf16 GEMM inputs, fp32 P, 64-key blocks) passes them and runs at 4.12 ms (MLX path) against MLX SDPA's 8.41 ms, with error equal to MPS SDPA's. v2 (key/value block raised from 64 to 128) in review, not yet run on the Mac |
 | 3. Swift host | not started |
 | 4. Benchmark | `bench/flash_attention_hd32.py` and `bench/run_mac.sh` done; no recorded run yet |
 

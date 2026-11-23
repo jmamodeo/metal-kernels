@@ -1,6 +1,6 @@
 # FlashAttention at head dim 32: design note
 
-Linear: MTL-10 (parent MTL-8). This note covers design only. There is no implementation in this change.
+Linear: MTL-10 (parent MTL-8). This note started as the design before any implementation; [Our hd32 kernel plan](#our-hd32-kernel-plan) now records what shipped in v0, v1 and v2.
 
 ## Why
 
@@ -25,7 +25,7 @@ Source read: [philipturner/metal-flash-attention](https://github.com/philipturne
 | Apple9 (M3/M4) | 16 | 128 | 16 | Q, O |
 | M1/M2 (≤ 96) | 32 | 128 | 32 | Q, O |
 
-On M3 this gives 64-thread threadgroups (2 simdgroups). Threadgroup memory is the max over the staged operand blocks. For FP16 Q/K/V that is `128 × 16 × 2` = 4 KB, which I computed from `createThreadgroupMemoryAllocation`. On Apple9, MFA reads full K/V blocks straight from device memory into registers (`preferAsyncLoad = false`) and keeps threadgroup staging for edge blocks.
+In MFA, this Apple9 row gives 64-thread threadgroups (2 simdgroups); our kernel uses 128-thread threadgroups instead (see the plan below). In MFA, threadgroup memory is the max over the staged operand blocks. For FP16 Q/K/V that is `128 × 16 × 2` = 4 KB, which I computed from `createThreadgroupMemoryAllocation`. On Apple9, MFA reads full K/V blocks straight from device memory into registers (`preferAsyncLoad = false`) and keeps threadgroup staging for edge blocks.
 
 **Precision.** Mixed-precision forward keeps Q/K/V in FP16 in memory and registers, S in FP16, P in FP16, and the O accumulator in FP32. O and L are always written as FP32. MFA uses BF16 only for backward operands (dO, D, dS). On Apple9 it treats BF16→FP32 as native (`hasNativeBF16Casting = supportsFamily(.apple9)`). Its BF16 load puts the 16 bits in the high half of an FP32 word (`load_bfloat` in `GEMMHeaders.swift`), which makes the decode a bit placement, not arithmetic. The README notes that Metal's `bfloat` type rounds IEEE-style, which is costly on chips without hardware BF16.
 
@@ -33,24 +33,30 @@ On M3 this gives 64-thread threadgroups (2 simdgroups). Threadgroup memory is th
 
 The target is Q, K, V `[1, 8, 5184, 32]` in bf16, output bf16, forward only, with no L output.
 
-1. **Grid.** There is one threadgroup per (head, 16-query block): 5184/16 = 324 per head, 2592 in total, each with 64 threads (2 simdgroups × 8 rows). This is the MFA Apple9 row. We add a head index instead of single-head dispatch.
-2. **Traversal block.** Start at Bk = 64. 5184 = 81 × 64, so the target shape has no key edge and needs no edge mask. Bk = 128 (the MFA value) leaves a 64-key tail. Keep the edge-mask path anyway for the cross-attention shape and for tests. Sweep Bk ∈ {32, 64, 128} in the benchmark.
-3. **Registers.** Per thread, D = 32 is four 8×8 tiles across. That gives Q cached at 4 tiles × 2 = 8 fp32, O at 8 fp32, S/P for Bk = 64 at 8 tiles × 2 = 16 fp32, plus m and l. *Estimate:* about 35–40 live 32-bit values per thread before temporaries. MFA caches both Q and O at this D, so spilling is not expected. Confirm with the Xcode GPU capture.
-4. **Threadgroup memory.** One K block and one V block of `64 × 32 × 2 B` = 4 KB each, so 8 KB if both are staged. That is an estimate from the shape, not a measurement. Version 0 stages K/V through threadgroup memory so both host paths behave the same. A later version tries MFA's direct device→register reads on M3 and records the difference.
-5. **bf16 handling.** Load bf16, widen to fp32 by bit placement (`as_type<float>(uint(bits) << 16)`), and run both GEMMs on `simdgroup_float8x8` with fp32 S, P and O. Write O as bf16 once at the end. Unlike MFA, we don't write O in FP32, because the SAM 3 caller wants bf16. Later work: a half-precision P·V with fp32 accumulate, gated by the NumPy tolerance.
+What shipped, by version:
+
+- **v0:** per-row online softmax. One simdgroup per query row, one lane per head-dim column, `simd_sum` dot products, fp32 math, no threadgroup memory.
+- **v1:** the tiled `simdgroup_matrix` kernel below with Bk = 64: 32 query rows and 128 threads per threadgroup, K/V loaded from device memory straight into registers, no threadgroup memory, bf16 GEMM inputs, fp32 P.
+- **v2:** v1 unchanged except Bk = 128.
+
+1. **Grid.** There is one threadgroup per (batch · head, 32-query block): 5184/32 = 162 per head, 1296 in total, each with 128 threads (4 simdgroups × 8 rows). This is MFA's M1/M2 parallelization of 32 rather than its Apple9 value of 16. We add a head index instead of single-head dispatch.
+2. **Traversal block.** v1 used Bk = 64; v2 uses Bk = 128, the MFA Apple9 value, which halves the softmax/rescale steps per query block at the target shape (81 key blocks → 41). 5184 = 40 × 128 + 64, so the target shape has a 64-key tail, handled by the edge-mask path that also covers the cross-attention shape and the tests.
+3. **Registers.** Per thread, D = 32 is four 8×8 tiles across. That gives Q cached at 4 tiles × 2 = 8 values, O at 8 fp32, S/P for Bk = 128 at 16 tiles × 2 = 32 fp32, plus m and l. *Estimate:* about 50–60 live 32-bit values per thread before temporaries. Confirm spilling with the Xcode GPU capture.
+4. **Threadgroup memory.** None, in every version. As MFA does on Apple9, each lane loads its K and V tile elements straight from device memory into registers; the four simdgroups of a threadgroup read the same K/V block at about the same time, so the repeats hit the cache. No barriers.
+5. **bf16 handling.** The GEMM inputs Q, K and V are `bfloat` tiles when the compiler defines `__HAVE_BFLOAT__` (Metal 3.1); otherwise bf16 is widened to fp32 by bit placement (`as_type<float>(uint(bits) << 16)`). S, P and the O accumulator are fp32, so P is never rounded. O is written as bf16 once at the end. Unlike MFA, we don't write O in FP32, because the SAM 3 caller wants bf16.
 6. **Softmax.** Follow MFA: fold the scale into `log2(e)·scale`, use exp2, apply the shuffle-xor row reductions, rescale O only when the max rises, and mask with the finite-negative sentinel. A row whose bias is −inf everywhere must output 0, matching the MTL-9 reference, so guard `1/l` when `l == 0`.
 7. **Hosts.** The single source file is `kernels/flash_attention_hd32/flash_attention_hd32.metal`.
-   - MLX: `mx.fast.metal_kernel(header=<source>, source=<body calling the device function>)`, launched with `grid = (64 · 2592, 1, 1)` and `threadgroup = (64, 1, 1)`. MLX grids count threads, as in `conv3x3.py`. Check that MLX's bf16 binding type matches what the shader expects (`verbose=True` prints the generated source).
-   - PyTorch MPS: `torch.mps.compile_shader(<source>)`, then `lib.flash_attention_hd32(q, k, v, out, dims, threads=..., group_size=[64,1,1])`, with contiguous bf16 tensors on `mps`.
+   - MLX: `mx.fast.metal_kernel(header=<source>, source=<body calling the device function>)`, launched with `grid = (128 · 1296, 1, 1)` and `threadgroup = (128, 1, 1)`. MLX grids count threads. Check that MLX's bf16 binding type matches what the shader expects (`verbose=True` prints the generated source).
+   - PyTorch MPS: `torch.mps.compile_shader(<source>)`, then `lib.flash_attention_hd32_bfloat(q, k, v, bias, out, dims, scale, threads=..., group_size=128)`, with contiguous bf16 tensors on `mps`.
    - Tests compare both against `reference/` from MTL-9 on small shapes, using the `metal` marker, and on the full shape.
 8. **Stretch: decoder cross-attention.** Q is `[1, 8, 201, 32]`, K/V are `[1, 8, 5184, 32]`, and there is an additive bias of `[1, 8, 201, 5184]`.
-   - Load the bias tile `[16 × Bk]` next to each K block and add it to S before the max. The scale applies before the bias, as in `softmax(q·kᵀ·scale + bias)`.
+   - Each lane loads its bias elements next to each K block and adds them to S before the max. The scale applies before the bias, as in `softmax(q·kᵀ·scale + bias)`.
    - Mask query rows past 201 on store.
    - The bias read (8·201·5184·2 B ≈ 16.7 MB in bf16) is bigger than K and V together (≈ 5.3 MB), so this shape is likely bandwidth-bound (estimate). Bias loads must be coalesced along the key axis.
-   - With 201 queries there are only 13 × 8 = 104 threadgroups. If the GPU is underfilled, split the key axis into chunks that write partial (O, m, l), then run a small combine kernel. That is a design option, not yet measured.
+   - With 201 queries there are only 7 × 8 = 56 threadgroups. If the GPU is underfilled, split the key axis into chunks that write partial (O, m, l), then run a small combine kernel. That is a design option, not yet measured.
 9. **Benchmark.** Add the kernel to `bench/` against MLX SDPA (the fallback) and PyTorch MPS SDPA at the same shapes and dtype. Record results in `bench/results/` per the metrics rule. The goal is to beat 4.29 ms (the MPS figure) at the target shape.
 
 ## Open questions
 
-- Does MLX's `metal_kernel` and `compile_shader` accept `bfloat` simdgroup matrices on our macOS/Xcode? Bf16 multiplies would skip the widen step.
-- Is 16 rows per threadgroup still best for the 324-blocks-per-head grid on M3 Max, or does 32 rows (as on M1) win? Sweep both.
+- The shader uses `bfloat` simdgroup matrices when the compiler defines `__HAVE_BFLOAT__` and widens to fp32 tiles otherwise. Which path each host takes on the M3 Max is not yet confirmed (`verbose=True` on MLX, or a GPU capture).
+- v1 and v2 use 32 rows per threadgroup. 16 rows with direct device→register loads has not been measured.

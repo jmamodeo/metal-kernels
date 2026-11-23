@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// FlashAttention for head dim 32, version 1.
+// FlashAttention for head dim 32, version 2.
 //
 // softmax(Q Kᵀ * scale + bias) V with an online softmax, so the score matrix
 // is never written to memory. One threadgroup of four simdgroups owns 32
 // query rows of one (batch, head); each simdgroup owns 8 rows and runs both
 // GEMMs on 8x8 simdgroup_matrix tiles with fp32 accumulators. K and V are
-// walked in blocks of 64 keys, loaded by each lane straight from device
+// walked in blocks of 128 keys, loaded by each lane straight from device
 // memory in the input dtype; there is no threadgroup memory. Q, K, V, bias
 // and O share one dtype, bf16 or fp32. Softmax and accumulation are fp32; a
 // bf16 O is rounded once at the end.
@@ -27,7 +27,7 @@ constant constexpr uint FA_HD32_HEAD_DIM = 32;
 constant constexpr uint FA_HD32_SIMD_WIDTH = 32;
 constant constexpr uint FA_HD32_TILE = 8;      // simdgroup_matrix side
 constant constexpr uint FA_HD32_BLOCK_Q = 32;  // query rows per threadgroup
-constant constexpr uint FA_HD32_BLOCK_K = 64;  // keys per K/V block
+constant constexpr uint FA_HD32_BLOCK_K = 128; // keys per K/V block
 constant constexpr uint FA_HD32_D_TILES = FA_HD32_HEAD_DIM / FA_HD32_TILE;
 constant constexpr uint FA_HD32_K_TILES = FA_HD32_BLOCK_K / FA_HD32_TILE;
 constant constexpr uint FA_HD32_THREADS = FA_HD32_BLOCK_Q / FA_HD32_TILE * FA_HD32_SIMD_WIDTH;
