@@ -42,7 +42,7 @@ Fused FlashAttention-style scaled dot-product attention for head dim 32. The SAM
 | --- | --- |
 | 1. NumPy reference | done: `reference/sdpa.py` |
 | 2. Metal kernel from Python | done: v6 is the current kernel. Tuning log below. |
-| 3. Swift host | not started |
+| 3. Swift host | done: `FlashAttentionHD32Kernel` in the `MetalKernels` package compiles the shared `.metal` file at runtime and launches the MPS entry points. `swift test` checks it against a CPU reference on macOS |
 | 4. Benchmark | `bench/flash_attention_hd32.py` and `bench/run_mac.sh` done. v0, v1, the v2–v4 trials, and v6 have been recorded on the M3 Max; the JSONL rows stay uncommitted until M4. v5 did not produce a timing row because it failed the MPS-SDPA error bound before the bench ran. The harness times a frozen copy of v1 (`bench/baselines/flash_attention_hd32_v1.metal`) interleaved with the candidate and the built-in on every iteration, in a position- and order-balanced rotation, at 102 timed iterations plus 12 warmup by default, and records a speed gate. Same-iteration samples are paired: the candidate passes only if the bootstrap 95% CI (10,000 resamples, fixed seed) of the median candidate/v1 time ratio lies entirely below 1. The earlier rule (median below v1's and outside v1's p10–p90 range) flagged a true 5% gain only about half the time, because v1's MLX p10–p90 is about ±4%. The same paired CI of the MPS candidate over MPS SDPA is the M3 target check and does not gate the version; v6 meets that target. |
 
 Figures below are same-record medians on the M3 Max at `[1, 8, 5184, 32]` bf16 unless noted.
