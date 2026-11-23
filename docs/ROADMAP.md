@@ -78,3 +78,23 @@ MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU. The M3
 #### Later
 
 Weight loading and a demo sit on top of the baseline above.
+
+## Distribution
+
+The `.metal` shader in `kernels/` is the source of truth. Python and Swift hosts load that file.
+
+### Source release
+
+The first release is v0.1.0: FlashAttention for head dim 32, shipped as source. Install from a checkout, as the README describes. There is no versioned wheel or package tag yet.
+
+### PyPI wheel
+
+Once the collection has two or three kernels, a single PyPI wheel for macOS arm64 can bundle a precompiled `.metallib` with thin PyTorch MPS and MLX entry points. Publishing a wheel is a later step, not part of the source release.
+
+### Swift package
+
+The in-repo `MetalKernels` package already loads the shared shader. A versioned SwiftPM distribution of that package is optional, and only worth doing if someone needs to depend on it without a checkout.
+
+### Upstreaming
+
+The higher-impact path is to take the small-head-dim attention kernel upstream: an MLX change, or a PyTorch MPS SDPA path for small head dims. This repository stays the place to build and measure the kernel.
