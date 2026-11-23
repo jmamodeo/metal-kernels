@@ -62,14 +62,19 @@ def test_kernel_is_registered(monkeypatch):
 
 
 def test_launch_constants_match_the_shader():
-    # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. One
-    # 64-key K block and one V block are staged in bf16 and shared by them.
+    # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. Two
+    # buffers of one 64-key K block and one V block are staged in bf16 and
+    # shared by them.
     assert (QUERY_BLOCK, THREADGROUP_SIZE) == (32, 128)
-    assert THREADGROUP_MEMORY_BYTES == 2 * KEY_BLOCK * 32 * 2 == 8192
+    assert THREADGROUP_MEMORY_BYTES == 2 * 2 * KEY_BLOCK * 32 * 2 == 16384
+    # The fp32 stage, twice the bf16 one, must fit Apple's 32 KB limit.
+    assert 2 * THREADGROUP_MEMORY_BYTES <= 32768
     source = metal_source(KERNEL_NAME)
-    assert "constant constexpr uint FA_HD32_KV_ELEMENTS = 2 * FA_HD32_BLOCK_ELEMENTS;" in source
+    assert "constant constexpr uint FA_HD32_BUFFER_ELEMENTS = 2 * FA_HD32_BLOCK_ELEMENTS;" in source
+    assert "constant constexpr uint FA_HD32_KV_ELEMENTS = 2 * FA_HD32_BUFFER_ELEMENTS;" in source
     assert "threadgroup T kv[FA_HD32_KV_ELEMENTS];" in source
-    assert "threadgroup_barrier(mem_flags::mem_threadgroup)" in source
+    # One barrier after the first block's copy, one per later block.
+    assert source.count("threadgroup_barrier(mem_flags::mem_threadgroup)") == 2
     assert "FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));" in _MLX_BODY
 
 
