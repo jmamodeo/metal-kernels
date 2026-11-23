@@ -209,6 +209,44 @@ public enum FlashAttentionHD32 {
         ].map { Int32($0) } + strides.map { Int32($0) }
     }
 
+    /// FLOPs per call: two GEMMs of `2 * Lq * Lk * D` per batch and head,
+    /// the count `bench/flash_attention_hd32.py` uses.
+    public static func flopsPerCall(_ geometry: Geometry) -> Double {
+        4 * Double(geometry.batch) * Double(geometry.heads) * Double(geometry.queryLength)
+            * Double(geometry.keyLength) * Double(headDim)
+    }
+
+    /// Median, min, p10 and p90 of per-call times in ms, as the Python bench
+    /// reports them.
+    public struct TimingSummary: Equatable, Sendable {
+        public let medianMs: Double
+        public let minMs: Double
+        public let p10Ms: Double
+        public let p90Ms: Double
+
+        /// `samples` must be non-empty. Percentiles interpolate linearly
+        /// between order statistics, like `bench.record.percentile`.
+        public init(samples: [Double]) {
+            precondition(!samples.isEmpty, "no timing samples")
+            let sorted = samples.sorted()
+            func percentile(_ fraction: Double) -> Double {
+                let position = Double(sorted.count - 1) * fraction
+                let low = Int(position.rounded(.down))
+                let high = Int(position.rounded(.up))
+                return sorted[low] + (sorted[high] - sorted[low]) * (position - Double(low))
+            }
+            medianMs = percentile(0.5)
+            minMs = sorted[0]
+            p10Ms = percentile(0.1)
+            p90Ms = percentile(0.9)
+        }
+
+        /// TFLOP/s at the median.
+        public func tflops(flops: Double) -> Double {
+            flops / (medianMs * 1e9)
+        }
+    }
+
     /// Product of `values`, or `nil` on overflow.
     static func product(_ values: [Int]) -> Int? {
         var result = 1

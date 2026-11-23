@@ -59,10 +59,7 @@ The bias is optional and additive, and is added after scaling. A `-inf` bias mas
 - Python: `metal_kernels.flash_attention.flash_attention_hd32(q, k, v, bias=None, scale=None, *, backend)`, with `backend="mlx"` for `mlx.core.array` inputs or `backend="mps"` for `torch.Tensor` inputs on `mps`.
   - MLX passes this file as `header` to `mx.fast.metal_kernel`.
   - PyTorch MPS compiles this file with `torch.mps.compile_shader`.
-- Swift: `FlashAttentionHD32Kernel` in the `MetalKernels` package (macOS). It compiles this file at runtime with `MTLDevice.makeLibrary(source:options:)`, so there is no second copy of the shader, and dispatches `flash_attention_hd32_bfloat` or `flash_attention_hd32_float` with the same buffers, `dims` layout and grid as the MPS launcher (`dims` and `scale` are passed with `setBytes`; `q` is bound as the unused bias placeholder).
-  - `encode(into:q:k:v:out:qShape:kShape:bias:biasShape:scale:dtype:)` encodes one launch on caller-owned contiguous `MTLBuffer`s (bf16 as `UInt16` bits).
-  - `run(q:k:v:qShape:kShape:bias:biasShape:scale:dtype:)` takes `[Float]` arrays, rounds them to bf16 for `.bfloat16`, waits for the GPU and returns `[Float]`.
-  - `FlashAttentionHD32.launchGeometry`, `biasStrides`, `resolveScale` and `dims` mirror `metal_kernels.flash_attention` and build on every platform. `swift/Tests/MetalKernelsTests/FlashAttentionHD32Tests.swift` checks them everywhere and, on macOS, checks GPU output against a CPU reference with the tolerances above (small shapes, tail blocks, broadcast `-inf` biases, fully masked rows, explicit scale, single key).
+- Swift: not started.
 - Benchmark: `bench/flash_attention_hd32.py` against `mx.fast.scaled_dot_product_attention` (unfused at D = 32) and PyTorch MPS SDPA. `bench/run_mac.sh <version>` tests, benchmarks and records a version. See [bench/README.md](../../bench/README.md).
 
 ```python

@@ -23,11 +23,18 @@ let package = Package(
         .target(
             name: "MetalKernels",
             path: "swift",
-            exclude: ["Tests", "README.md"],
+            exclude: ["Tests", "README.md", "Sources/FlashAttentionHD32Bench"],
             sources: ["Sources/MetalKernels"],
             resources: [
                 .copy("../kernels"),
             ]
+        ),
+        // Timing mode for the Swift host; see swift/README.md. An executable
+        // target, not a second library product.
+        .executableTarget(
+            name: "FlashAttentionHD32Bench",
+            dependencies: ["MetalKernels"],
+            path: "swift/Sources/FlashAttentionHD32Bench"
         ),
         .testTarget(
             name: "MetalKernelsTests",

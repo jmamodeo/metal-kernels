@@ -96,17 +96,7 @@ As a local SwiftPM dependency:
 
 There is no version tag yet.
 
-`swift test` builds the source loader and checks that the bundled `kernels/` copy matches the checkout. On macOS it also launches `flash_attention_hd32` on the GPU and checks it against a CPU reference. The Metal host is compiled only where `import Metal` is available, so the package still builds elsewhere; the launch tests skip there.
-
-```swift
-import MetalKernels
-
-let attention = try FlashAttentionHD32Kernel()  // compiles kernels/flash_attention_hd32/flash_attention_hd32.metal
-let out = try attention.run(
-    q: q, k: k, v: v,
-    qShape: [1, 8, 5184, 32], kShape: [1, 8, 5184, 32],
-    dtype: .bfloat16)
-```
+`swift test` builds the source loader and checks that the bundled `kernels/` copy matches the checkout. The package does not import Metal. Running a kernel still requires macOS.
 
 SwiftPM prints `Found unhandled resource at <repo>/kernels` while doing this. The resource lives outside the Swift target directory, which is what that line reports, and the directory is still bundled.
 

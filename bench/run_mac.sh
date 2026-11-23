@@ -3,6 +3,11 @@
 # Test, benchmark and record one FlashAttention hd32 version on Apple silicon.
 #
 #   bench/run_mac.sh <version> [design]
+#   bench/run_mac.sh swift
+#
+# `swift` checks the Swift host instead: swift build, swift test (the GPU
+# correctness run), then the release-built timing mode, FlashAttentionHD32Bench,
+# at [1, 8, 5184, 32] in bf16 and fp32. It prints and records nothing else.
 #
 # Installs the Mac extra, runs the metal tests, then runs
 # bench/flash_attention_hd32.py with --record. The record goes to
@@ -16,10 +21,24 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 || -z "$1" ]]; then
-    echo "usage: bench/run_mac.sh <version> [design]" >&2
+    echo "usage: bench/run_mac.sh <version> [design] | bench/run_mac.sh swift" >&2
     exit 2
 fi
 version="$1"
+
+if [[ "$version" == "swift" ]]; then
+    if [[ $# -ne 1 ]]; then
+        echo "usage: bench/run_mac.sh swift" >&2
+        exit 2
+    fi
+    cd "$(dirname "${BASH_SOURCE[0]}")/.."
+    echo "git SHA: $(git rev-parse HEAD)"
+    swift build
+    swift test
+    swift run -c release FlashAttentionHD32Bench
+    echo "git SHA: $(git rev-parse HEAD)"
+    exit 0
+fi
 
 case "$version" in
     v0)

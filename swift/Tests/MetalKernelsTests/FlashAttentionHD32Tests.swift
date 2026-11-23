@@ -148,6 +148,22 @@ final class FlashAttentionHD32Tests: XCTestCase {
         }
     }
 
+    func testTimingSummaryMatchesBenchPercentiles() throws {
+        // bench.record.percentile on sorted [1, 2, 3, 4, 10]: p10 1.4, p90 7.6.
+        let summary = FlashAttentionHD32.TimingSummary(samples: [4, 1, 10, 3, 2])
+        XCTAssertEqual(summary.medianMs, 3)
+        XCTAssertEqual(summary.minMs, 1)
+        XCTAssertEqual(summary.p10Ms, 1.4, accuracy: 1e-12)
+        XCTAssertEqual(summary.p90Ms, 7.6, accuracy: 1e-12)
+        XCTAssertEqual(FlashAttentionHD32.TimingSummary(samples: [1, 2, 3, 4]).medianMs, 2.5)
+
+        let geometry = try FlashAttentionHD32.launchGeometry(
+            q: [1, 8, 5184, 32], k: [1, 8, 5184, 32], v: [1, 8, 5184, 32])
+        let flops = FlashAttentionHD32.flopsPerCall(geometry)
+        XCTAssertEqual(flops, 4 * 8 * 5184 * 5184 * 32)
+        XCTAssertEqual(summary.tflops(flops: flops), flops / 3e9, accuracy: 1e-9)
+    }
+
     // GPU launches: macOS with a Metal device only.
 
     #if canImport(Metal)
