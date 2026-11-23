@@ -201,6 +201,46 @@ def test_flash_attention_bench_interleaves_variants():
     assert syncs[3 * warmup :] == [value for name in timed for value in (None, name)]
 
 
+def test_flash_attention_bench_samples_are_equal_length_and_in_iteration_order(monkeypatch):
+    bench = _load_flash_attention_bench()
+
+    class Clock:
+        now = 0.0
+
+        @classmethod
+        def perf_counter(cls):
+            return cls.now
+
+    monkeypatch.setattr(bench, "time", Clock)
+    iteration = {"index": -1}
+    log = []
+
+    def make(name):
+        offset = bench.VARIANTS.index(name) / 10
+
+        def call():
+            if not log or len(log) % 3 == 0:
+                iteration["index"] += 1
+            log.append(name)
+            # Each call takes (iteration + 1 + offset) ms, so a sample encodes
+            # the iteration it came from.
+            Clock.now += (iteration["index"] + 1 + offset) * 1e-3
+            return name
+
+        return call
+
+    calls = {name: make(name) for name in bench.VARIANTS}
+    warmup, iterations = 6, 12
+    samples, _ = bench.time_interleaved(calls, lambda _: None, warmup, iterations)
+    assert {name: len(values) for name, values in samples.items()} == dict.fromkeys(
+        calls, iterations
+    )
+    for name, values in samples.items():
+        offset = bench.VARIANTS.index(name) / 10
+        expected = [warmup + i + 1 + offset for i in range(iterations)]
+        assert values == pytest.approx(expected)
+
+
 def test_flash_attention_bench_frozen_v1_baseline():
     bench = _load_flash_attention_bench()
     source = bench.BASELINE_SOURCE.read_text()
