@@ -57,10 +57,13 @@ each framework's interleave and takes the per-iteration ratio
 the median ratio (`record.median_ratio_ci`: percentile bootstrap, 10,000
 resamples, fixed seed 0, so the result is reproducible):
 
-- bf16 gate, against v7: passes for a framework when the interval includes 1
-  or lies entirely below it (`record.no_slower_gate`).
-- fp32 check, against v6: passes when the interval's upper bound is at most
-  1.01 (`FP32_RATIO_LIMIT`). It does not gate speed.
+- bf16 gate, against v7: passes for a framework when the interval's upper
+  bound is at most 1.01 (`RATIO_LIMIT`, `record.ratio_bound_gate`). Until
+  v7.1 the rule was that the interval includes 1 or lies below it; that was
+  too strict for build-to-build noise (at `bf0b730` an unchanged bf16 loop
+  measured MLX 1.0016 [1.0005, 1.0031] and MPS 1.0049 [1.0036, 1.0058]
+  against v7).
+- fp32 gate, against v6: the same rule, upper bound at most 1.01.
 
 p10, median and p90 are still printed and recorded, but do not decide either
 rule. The bf16 paired interval for the MPS candidate over MPS SDPA is printed

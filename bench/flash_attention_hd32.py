@@ -26,9 +26,9 @@ Samples from the same iteration are paired, and every rule below uses the
 bootstrap 95% CI of the median ``candidate / baseline`` ratio
 (``record.median_ratio_ci``: 10,000 resamples, seed 0), per framework:
 
-- bf16 gate (against v7): the CI includes 1 or lies entirely below it.
-- fp32 check (against v6): the CI's upper bound is at most
-  ``FP32_RATIO_LIMIT`` (1.01). It does not gate speed.
+- bf16 gate (against v7): the CI's upper bound is at most ``RATIO_LIMIT``
+  (1.01). "Includes 1" was too strict for build-to-build noise.
+- fp32 gate (against v6): the CI's upper bound is at most ``RATIO_LIMIT``.
 
 The paired CI of the bf16 MPS candidate over MPS SDPA is reported as the M3
 target check but does not gate. All are printed and recorded, one record per
@@ -59,7 +59,6 @@ from bench.record import (  # noqa: E402
     BASELINE,
     add_record_arguments,
     median_ratio_ci,
-    no_slower_gate,
     percentile,
     ratio_bound_gate,
     record_if_requested,
@@ -77,17 +76,16 @@ FRAMEWORKS = ("mlx", "mps")
 VARIANTS = (BASELINE, "kernel", "builtin")
 # Frozen baseline timed against the candidate, per dtype.
 BASELINE_VERSIONS = {"bfloat16": "v7", "float32": "v6"}
-# fp32 check: the paired candidate/v6 CI's upper bound may not exceed this.
-FP32_RATIO_LIMIT = 1.01
-GATES = {"bfloat16": no_slower_gate, "float32": ratio_bound_gate(FP32_RATIO_LIMIT)}
+# Gate for both dtypes: the paired candidate/baseline CI's upper bound may
+# not exceed this.
+RATIO_LIMIT = 1.01
+GATES = {dtype: ratio_bound_gate(RATIO_LIMIT) for dtype in DTYPES}
 GATE_RULES = {
     "bfloat16": (
-        "bf16 gate: paired candidate/v7 median-ratio bootstrap 95% CI includes 1 or lies "
-        "entirely below it"
+        f"bf16 gate: paired candidate/v7 median-ratio bootstrap 95% CI upper bound <= {RATIO_LIMIT}"
     ),
     "float32": (
-        f"fp32 check, not a speed gate: paired candidate/v6 median-ratio bootstrap 95% CI "
-        f"upper bound <= {FP32_RATIO_LIMIT}"
+        f"fp32 gate: paired candidate/v6 median-ratio bootstrap 95% CI upper bound <= {RATIO_LIMIT}"
     ),
 }
 # Williams design for three variants: all six orders, sequenced so that over

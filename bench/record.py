@@ -133,15 +133,6 @@ def speed_gate(ratio_ci: dict) -> bool:
     return ratio_ci["ci_high"] < 1
 
 
-def no_slower_gate(ratio_ci: dict) -> bool:
-    """Whether a candidate is not measurably slower than the baseline in one run.
-
-    Passes when the :func:`median_ratio_ci` of candidate over baseline
-    includes 1 or lies entirely below it.
-    """
-    return ratio_ci["ci_low"] <= 1
-
-
 def ratio_bound_gate(limit: float) -> Callable[[dict], bool]:
     """A gate that passes when the ratio CI's upper bound is at most ``limit``."""
 

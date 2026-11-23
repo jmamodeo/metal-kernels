@@ -72,10 +72,14 @@ def test_launch_constants_match_the_shader():
     assert "FA_HD32_KV_ELEMENTS" not in source
     assert "static constant constexpr uint buffers = sizeof(T) == 2 ? 2 : 1;" in source
     assert "threadgroup T kv[FaHd32Stage<T>::elements];" in source
-    # One barrier after the first block's copy and one per later block; the
-    # single fp32 buffer adds one before each store.
-    assert source.count("threadgroup_barrier(mem_flags::mem_threadgroup)") == 3
-    assert "if (Stage::buffers == 1) {" in source
+    # bf16 runs v7's loop (one barrier after the first block's copy and one
+    # per later block); fp32 runs v6's (one before and one after each block's
+    # math). The loop is picked by element size.
+    assert source.count("threadgroup_barrier(mem_flags::mem_threadgroup)") == 4
+    assert "    FaHd32ElementSize<2>,\n" in source
+    assert "    FaHd32ElementSize<4>,\n" in source
+    assert "FaHd32ElementSize<sizeof(T)>()" in source
+    assert "Stage::buffers" not in source
     assert "FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));" in _MLX_BODY
 
 

@@ -18,9 +18,9 @@
 # balanced rotating order (102 timed plus 12 warmup by default), and prints the
 # max and mean abs error against sdpa_reference, median/min/p10/p90 ms per call
 # for all six variants, and the paired bootstrap 95% CI of the median
-# candidate/baseline ratio (10,000 resamples, seed 0). The bf16 gate passes
-# when that CI includes 1 or lies below it; the fp32 check, which does not gate
-# speed, passes when its upper bound is at most 1.01. The bf16 candidate/MPS
+# candidate/baseline ratio (10,000 resamples, seed 0). Both the bf16 gate
+# (against v7) and the fp32 gate (against v6) pass when that CI's upper bound
+# is at most 1.01. The bf16 candidate/MPS
 # SDPA ratio CI is reported too, and the git SHA. Nothing is committed.
 set -euo pipefail
 
@@ -62,7 +62,7 @@ case "$version" in
         default_design="v6 with the K/V stage double buffered in threadgroup memory (16 KB for bf16, 32 KB for fp32): the next 64-key block's device loads are issued into registers before the current block's math and stored into the other buffer after it, one barrier per block instead of two"
         ;;
     v7.1)
-        default_design="v7 with a single-buffer fp32 K/V stage (16 KB for both dtypes): bf16 keeps v7's double buffer and one barrier per block; fp32 issues the next block's device loads into registers before the math, then a barrier, the store into the one buffer, and a barrier"
+        default_design="bf16 runs v7's loop unchanged (double-buffered 16 KB K/V stage, one barrier per block); fp32 runs v6's loop unchanged (single-buffer 16 KB stage, each block copied straight into it, a barrier before and after the math), picked by element size in the one shader"
         ;;
     *)
         default_design=""

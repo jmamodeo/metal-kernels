@@ -127,18 +127,17 @@ def test_record_includes_baseline_and_speed_gate(tmp_path, monkeypatch, inputs):
 
 
 @pytest.mark.parametrize(
-    ("low", "high", "no_slower", "bounded"),
+    ("low", "high", "bounded"),
     [
-        (0.95, 0.99, True, True),  # entirely below 1
-        (0.99, 1.005, True, True),  # includes 1
-        (1.0, 1.01, True, True),  # touches 1 and the bound
-        (1.002, 1.009, False, True),  # above 1, within 1.01
-        (1.005, 1.02, False, False),  # above both
+        (0.95, 0.99, True),  # entirely below 1
+        (0.99, 1.005, True),  # includes 1
+        (1.0, 1.01, True),  # touches the bound
+        (1.002, 1.009, True),  # above 1, within 1.01
+        (1.005, 1.02, False),  # above the bound
     ],
 )
-def test_no_slower_and_ratio_bound_gates(low, high, no_slower, bounded):
+def test_ratio_bound_gate(low, high, bounded):
     ratio = {"ci_low": low, "ci_high": high}
-    assert record.no_slower_gate(ratio) is no_slower
     assert record.ratio_bound_gate(1.01)(ratio) is bounded
 
 
