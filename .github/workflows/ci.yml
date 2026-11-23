@@ -8,8 +8,9 @@ on:
 jobs:
   macos:
     name: macOS
-    # Apple silicon. macos-14 or newer is arm64 on GitHub-hosted runners.
-    runs-on: macos-15
+    # Apple silicon. macos-14 was retired in November 2026; the current
+    # arm64 hosted image is macos-26 (also macos-latest).
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
