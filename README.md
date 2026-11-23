@@ -4,7 +4,7 @@ A community collection of Apple Metal GPU kernels for Apple silicon. Each kernel
 
 Kernels are chosen by profiling real models and writing a custom kernel only where the built-in Metal ops fall short. The first workload profiled is Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3). Its integration and shape benchmarks live in `metal_kernels.integrations.sam3` and `bench/sam3_shapes/`.
 
-The registry holds one kernel, [`flash_attention_hd32`](kernels/flash_attention_hd32/README.md): Metal FlashAttention for head dim 32, the only kernel this collection will ship. Version 6 is the current kernel. It launches from MLX and PyTorch MPS. On the M3 Max at `[1, 8, 5184, 32]` bf16 it matches / is about 1% faster than MPS SDPA (same-record paired MPS kernel/SDPA 0.9913 [0.9880, 0.9928]; medians 3.803 ms vs 3.833 ms).
+The registry holds one kernel, [`flash_attention_hd32`](kernels/flash_attention_hd32/README.md): Metal FlashAttention for head dim 32, the only kernel this collection will ship. Version 7 is the current kernel. It launches from MLX and PyTorch MPS, and from the [Swift host](swift/README.md). On one measured configuration — Apple M3 Max, macOS 26.7.3, torch 2.15.0, MLX 0.32.4, at `[1, 8, 5184, 32]` bf16 — it is about 2% faster than MPS SDPA (paired MPS kernel/SDPA median ratio 0.9798, 95% CI [0.9788, 0.9807]; 102 pairs, 10,000 resamples).
 
 ```python
 from metal_kernels.flash_attention import flash_attention_hd32
@@ -82,11 +82,13 @@ An editable install from a checkout is the supported way to find `kernels/`. The
 
 ### Swift
 
-The package name is `MetalKernels`. It needs Swift 6.0 or newer. From the repository root:
+The package name is `MetalKernels`. It needs Swift 6.0 or newer. See [swift/README.md](swift/README.md) for the host that compiles and launches `flash_attention_hd32` through the Metal API, plus the timing mode. From the repository root:
 
 ```bash
 swift test
 ```
+
+On a Mac, `bench/run_mac.sh swift` builds the package, runs the tests, and times `[1, 8, 5184, 32]`.
 
 As a local SwiftPM dependency:
 
@@ -96,13 +98,13 @@ As a local SwiftPM dependency:
 
 There is no version tag yet.
 
-`swift test` builds the source loader and checks that the bundled `kernels/` copy matches the checkout. The package does not import Metal. Running a kernel still requires macOS.
+`swift test` also checks that the bundled `kernels/` copy matches the checkout.
 
 SwiftPM prints `Found unhandled resource at <repo>/kernels` while doing this. The resource lives outside the Swift target directory, which is what that line reports, and the directory is still bundled.
 
 ## Results
 
-Measured on an M3 Max at `[1, 8, 5184, 32]` bf16. The current kernel matches / is about 1% faster than MPS SDPA.
+On one measured configuration — Apple M3 Max, macOS 26.7.3, torch 2.15.0, MLX 0.32.4, at `[1, 8, 5184, 32]` bf16 — the current kernel is about 2% faster than MPS SDPA (paired MPS kernel/SDPA median ratio 0.9798, 95% CI [0.9788, 0.9807]; 102 pairs, 10,000 resamples).
 
 The reviewable table is generated from `bench/results/flash_attention_hd32.jsonl` (append-only recorded runs) by:
 
