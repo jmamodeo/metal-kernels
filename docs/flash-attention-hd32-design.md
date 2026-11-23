@@ -38,7 +38,7 @@ What shipped, by version:
 - **v0:** per-row online softmax. One simdgroup per query row, one lane per head-dim column, `simd_sum` dot products, fp32 math, no threadgroup memory.
 - **v1:** the tiled `simdgroup_matrix` kernel below with Bk = 64: 32 query rows and 128 threads per threadgroup, K/V loaded from device memory straight into registers, no threadgroup memory, bf16 GEMM inputs, fp32 P.
 - **v2:** Bk = 128 was tried and was slower on the M3 Max (see [ROADMAP](ROADMAP.md)); it was not kept. The kernel is v1.
-- **v6 (candidate, MTL-29):** v1 with each 64-key K/V block copied once per threadgroup into 8 KB of bf16 threadgroup memory by all 128 threads, then shared by the four simdgroups, with two barriers per block. Not yet timed.
+- **v6 (current kernel):** v1 with each 64-key K/V block copied once per threadgroup into 8 KB of bf16 threadgroup memory by all 128 threads, then shared by the four simdgroups, with two barriers per block. Measured on the M3 Max; the M3 target is met. Figures are in [docs/ROADMAP.md](ROADMAP.md).
 
 1. **Grid.** There is one threadgroup per (batch · head, 32-query block): 5184/32 = 162 per head, 1296 in total, each with 128 threads (4 simdgroups × 8 rows). This is MFA's M1/M2 parallelization of 32 rather than its Apple9 value of 16. We add a head index instead of single-head dispatch.
 2. **Traversal block.** The current kernel uses Bk = 64. 5184 = 81 × 64, so the target shape has no key-block tail. The edge-mask path is kept for other lengths, the cross-attention shape, and the tests. v2 tried Bk = 128 (the MFA Apple9 value) and was slower, likely from register pressure (16 S/P tiles instead of 8) and the 64-key tail that 5184 then required; that change was reverted.

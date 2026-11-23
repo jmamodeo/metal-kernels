@@ -56,11 +56,12 @@ On the Mac, one command installs the `mac` extra, runs `pytest -m metal`, runs
 the benchmark with `--record --version <version>`, and prints the git SHA:
 
 ```bash
-bench/run_mac.sh v1
+bench/run_mac.sh v6
 ```
 
-It uses `./.venv` when present. `v0` and `v1` have a default design text;
-later versions pass theirs as a second argument: `bench/run_mac.sh v3 "TEXT"`. The script appends to
+It uses `./.venv` when present. The current kernel is v6. `v0`, `v1` and `v6`
+have a default design text; other versions pass theirs as a second argument:
+`bench/run_mac.sh v3 "TEXT"`. The script appends to
 `bench/results/flash_attention_hd32.jsonl` and commits nothing.
 
 ## Recording kernel versions

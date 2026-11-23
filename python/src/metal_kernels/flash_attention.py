@@ -6,10 +6,10 @@
 MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
-Version 6 is the tiled ``simdgroup_matrix`` kernel from the design note:
-one threadgroup of four simdgroups per 32 query rows of one (batch, head),
-K/V walked in 64-key blocks that the whole threadgroup copies once into
-threadgroup memory, in the input dtype, and the four simdgroups share.
+Version 6 is the current kernel: the tiled ``simdgroup_matrix`` kernel
+from the design note, one threadgroup of four simdgroups per 32 query
+rows of one (batch, head), with each 64-key K/V block copied once into
+threadgroup memory, in the input dtype, and shared by the four simdgroups.
 """
 
 from __future__ import annotations

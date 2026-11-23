@@ -4,9 +4,7 @@ Fused scaled dot-product attention for head dim 32, written for the SAM 3 detect
 
 ## Status
 
-Version 6 (candidate, MTL-29): the v1 tiled `simdgroup_matrix` kernel with each 64-key K/V block copied once per threadgroup into threadgroup memory, in bf16, and shared by the four simdgroups. Every simdgroup builds the same K and V tiles as v1, so the output should be identical to v1's. v6 has not yet been timed; `bench/run_mac.sh v6` tests, benchmarks and records it against the frozen v1.
-
-Version 1 (32 query rows, 128 threads, 64-key K/V blocks loaded from device into registers, bf16 GEMM inputs, fp32 P) kept the v0 interface: the same Python API, buffers, `dims` layout, bias semantics and tolerances. On the M3 Max at `[1, 8, 5184, 32]` bf16 it runs at 4.12 ms (MLX path) against MLX SDPA's 8.41 ms in the same record (2.04×), and 4.17 ms (MPS path) against MPS SDPA's 3.91 ms, with max abs error equal to MPS SDPA's. `bench/run_mac.sh v1` tests, benchmarks and records it. Earlier versions and a recorded v2 trial are in [docs/ROADMAP.md](../../docs/ROADMAP.md).
+Version 6 is the current kernel: the v1 tiled `simdgroup_matrix` kernel with each 64-key K/V block copied once per threadgroup into 8 KB of bf16 threadgroup memory, shared by the four simdgroups. On the M3 Max at `[1, 8, 5184, 32]` bf16, same-record medians are 3.837 ms (MLX path) against v1's 4.330 ms and MLX SDPA's 8.366 ms, and 3.803 ms (MPS path) against v1's 4.106 ms and MPS SDPA's 3.833 ms. The paired candidate/v1 median-ratio 95% CIs are 0.8877 [0.8723, 0.9109] (MLX) and 0.9242 [0.9224, 0.9272] (MPS). The M3 target is met: the paired MPS kernel / MPS SDPA ratio is 0.9913 [0.9880, 0.9928]. Max abs error is 9.289e-4, equal to MPS SDPA's, mean 2.603e-5. `bench/run_mac.sh v6` tests, benchmarks and records it against the frozen v1. Earlier versions are in [docs/ROADMAP.md](../../docs/ROADMAP.md).
 
 ## What it computes
 
