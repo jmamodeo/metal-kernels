@@ -4,7 +4,7 @@ A community collection of Apple Metal GPU kernels for Apple silicon. Each kernel
 
 Kernels are chosen by profiling real models and writing a custom kernel only where the built-in Metal ops fall short. The first workload profiled is Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3). Its integration and shape benchmarks live in `metal_kernels.integrations.sam3` and `bench/sam3_shapes/`.
 
-The registry holds one kernel, [`flash_attention_hd32`](kernels/flash_attention_hd32/README.md): Metal FlashAttention for head dim 32, the only kernel this collection will ship. Version 1 (the tiled `simdgroup_matrix` kernel) launches from MLX and PyTorch MPS:
+The registry holds one kernel, [`flash_attention_hd32`](kernels/flash_attention_hd32/README.md): Metal FlashAttention for head dim 32, the only kernel this collection will ship. Version 6 is the current kernel. It launches from MLX and PyTorch MPS. On the M3 Max at `[1, 8, 5184, 32]` bf16 it matches / is about 1% faster than MPS SDPA (same-record paired MPS kernel/SDPA 0.9913 [0.9880, 0.9928]; medians 3.803 ms vs 3.833 ms).
 
 ```python
 from metal_kernels.flash_attention import flash_attention_hd32
@@ -99,6 +99,18 @@ There is no version tag yet.
 `swift test` builds the source loader and checks that the bundled `kernels/` copy matches the checkout. The package does not import Metal. Running a kernel still requires macOS.
 
 SwiftPM prints `Found unhandled resource at <repo>/kernels` while doing this. The resource lives outside the Swift target directory, which is what that line reports, and the directory is still bundled.
+
+## Results
+
+Measured on an M3 Max at `[1, 8, 5184, 32]` bf16. The current kernel matches / is about 1% faster than MPS SDPA.
+
+The reviewable table is generated from `bench/results/flash_attention_hd32.jsonl` (append-only recorded runs) by:
+
+```bash
+python tools/results_table.py flash_attention_hd32
+```
+
+That writes [bench/results/flash_attention_hd32.md](bench/results/flash_attention_hd32.md). The same table is in the [kernel README](kernels/flash_attention_hd32/README.md#results). The JSONL is committed with the table so the numbers can be regenerated.
 
 ## Contributing
 
