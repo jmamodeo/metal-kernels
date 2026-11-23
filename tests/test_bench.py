@@ -91,7 +91,13 @@ def test_flash_attention_bench_flops_and_bytes():
 def test_flash_attention_bench_summary():
     bench = _load_flash_attention_bench()
     stats = bench.summarize([4.0, 1.0, 3.0, 2.0, 5.0], flops=2_000_000_000)
-    assert stats == {"median_ms": 3.0, "p10_ms": 1.4, "p90_ms": 4.6, "tflops": 2e9 / 3e9}
+    assert stats == {
+        "median_ms": 3.0,
+        "min_ms": 1.0,
+        "p10_ms": 1.4,
+        "p90_ms": 4.6,
+        "tflops": 2e9 / 3e9,
+    }
     assert bench.percentile is record.percentile
     assert record.percentile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1) == pytest.approx(1.4)
 

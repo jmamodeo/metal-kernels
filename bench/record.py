@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import platform
+import random
 import re
 import statistics
 import subprocess
@@ -21,6 +22,11 @@ RESULTS = REPO / "bench" / "results"
 # the same run) is optional; ``kernel`` and ``builtin`` are required.
 REQUIRED_VARIANTS = ("kernel", "builtin")
 BASELINE = "baseline"
+# Paired bootstrap of the median per-iteration time ratio. The fixed seed makes
+# the interval, and so the speed gate, reproducible for a given set of samples.
+BOOTSTRAP_RESAMPLES = 10_000
+BOOTSTRAP_SEED = 0
+CI_LEVEL = 0.95
 
 
 def results_path(kernel: str, suffix: str, directory: Path = RESULTS) -> Path:
@@ -77,16 +83,53 @@ def percentile(sorted_values: list[float], fraction: float) -> float:
     return sorted_values[low] + (sorted_values[high] - sorted_values[low]) * (position - low)
 
 
-def speed_gate(kernel: dict, baseline: dict) -> bool:
+def median_ratio_ci(
+    candidate,
+    reference,
+    *,
+    resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+    level: float = CI_LEVEL,
+) -> dict:
+    """Median of paired ``candidate / reference`` ratios with a bootstrap CI.
+
+    ``candidate`` and ``reference`` are per-iteration milliseconds in
+    iteration order, so ``candidate[i]`` and ``reference[i]`` were timed in the
+    same interleaved iteration. The interval is the percentile bootstrap of
+    the median ratio over ``resamples`` resamples of the iterations, drawn
+    with ``random.Random(seed)``. A ratio below 1 means the candidate is faster.
+    """
+    candidate = [float(value) for value in candidate]
+    reference = [float(value) for value in reference]
+    if not candidate or len(candidate) != len(reference):
+        raise ValueError("paired timings must be non-empty and the same length")
+    if any(not math.isfinite(value) or value <= 0 for value in candidate + reference):
+        raise ValueError("timings must contain positive finite milliseconds")
+    if resamples < 1 or not 0 < level < 1:
+        raise ValueError("resamples must be positive and level between 0 and 1")
+    ratios = [c / r for c, r in zip(candidate, reference)]
+    rng = random.Random(seed)
+    count = len(ratios)
+    medians = sorted(statistics.median(rng.choices(ratios, k=count)) for _ in range(resamples))
+    tail = (1 - level) / 2
+    return {
+        "median_ratio": statistics.median(ratios),
+        "ci_low": percentile(medians, tail),
+        "ci_high": percentile(medians, 1 - tail),
+        "level": level,
+        "resamples": resamples,
+        "seed": seed,
+        "pairs": count,
+    }
+
+
+def speed_gate(ratio_ci: dict) -> bool:
     """Whether a candidate is measurably faster than the baseline in one run.
 
-    ``kernel`` and ``baseline`` carry ``median_ms``, ``p10_ms`` and ``p90_ms``.
-    The candidate passes only if its median is below the baseline's median
-    and outside the baseline's p10 to p90 range.
+    ``ratio_ci`` is the :func:`median_ratio_ci` of candidate over baseline.
+    The candidate passes only if the whole interval lies below 1.
     """
-    median = kernel["median_ms"]
-    inside = baseline["p10_ms"] <= median <= baseline["p90_ms"]
-    return median < baseline["median_ms"] and not inside
+    return ratio_ci["ci_high"] < 1
 
 
 def _timing(samples, flops: int, bytes_per_call: int) -> dict:
@@ -127,10 +170,14 @@ def append_record(
     Each timings entry has ``kernel`` and ``builtin`` millisecond samples,
     and optionally ``baseline`` samples from a frozen earlier kernel timed in
     the same run. ``bytes_per_call`` has the same framework and variant keys
-    as timings. With a baseline, the framework's kernel entry gains
-    ``speedup_vs_baseline``, and the record's ``speed_gate`` maps the
-    framework to the :func:`speed_gate` result. ``speed_gate`` is ``None``
-    when no framework has a baseline.
+    as timings. Samples are in iteration order, and the variants of one
+    framework were timed in the same interleaved iterations, so they have the
+    same length and are paired by index. The framework's kernel entry gains
+    ``ratio_vs_builtin``, the :func:`median_ratio_ci` of kernel over built-in,
+    which is reported only. With a baseline, it also gains
+    ``speedup_vs_baseline`` and ``ratio_vs_baseline``, and the record's
+    ``speed_gate`` maps the framework to the :func:`speed_gate` result.
+    ``speed_gate`` is ``None`` when no framework has a baseline.
     Correctness entries contain ``reference`` and ``builtin`` error dicts
     (``max_abs_error``, ``mean_abs_error``), ``rtol``, ``atol``, and ``passed``.
     The caller computes correctness on the same inputs used by both implementations.
@@ -183,12 +230,15 @@ def append_record(
         kernel_timing["speedup"] = (
             variants[framework]["builtin"]["median_ms"] / kernel_timing["median_ms"]
         )
+        kernel_timing["ratio_vs_builtin"] = median_ratio_ci(samples["kernel"], samples["builtin"])
         if BASELINE in samples:
             baseline_timing = variants[framework][BASELINE]
             kernel_timing["speedup_vs_baseline"] = (
                 baseline_timing["median_ms"] / kernel_timing["median_ms"]
             )
-            gates[framework] = speed_gate(kernel_timing, baseline_timing)
+            ratio = median_ratio_ci(samples["kernel"], samples[BASELINE])
+            kernel_timing["ratio_vs_baseline"] = ratio
+            gates[framework] = speed_gate(ratio)
     commit, dirty = _git()
     record = {
         "recorded_at": datetime.now(timezone.utc).isoformat(),

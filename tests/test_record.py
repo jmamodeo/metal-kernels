@@ -72,10 +72,13 @@ def test_record_fields_and_append(tmp_path, monkeypatch, inputs):
         "tflops": 1.0,
         "gb_per_s": 1.0,
         "speedup": 3.0,
+        "ratio_vs_builtin": record.median_ratio_ci([1, 2, 3], [4, 6, 8]),
     }
+    assert kernel["ratio_vs_builtin"]["median_ratio"] == pytest.approx(1 / 3)
     assert first["variants"]["mlx"]["builtin"]["gb_per_s"] == pytest.approx(2 / 3)
     assert "baseline" not in first["variants"]["mlx"]
     assert "speedup_vs_baseline" not in kernel
+    assert "ratio_vs_baseline" not in kernel
     assert first["speed_gate"] is None
 
 
@@ -100,12 +103,14 @@ def test_record_includes_baseline_and_speed_gate(tmp_path, monkeypatch, inputs):
     }
     assert set(data["variants"]["mlx"]) == {"baseline", "kernel", "builtin"}
     assert data["variants"]["mlx"]["kernel"]["speedup_vs_baseline"] == 2.0
-    # Kernel medians 2.0 (mlx) and 3.0 (mps) are below v1's p10 of 3.2 and 3.1.
-    assert data["speed_gate"] == {"mlx": True, "mps": True}
-    # 3.4 is below v1's mps median of 3.5 but inside its p10 to p90 range.
-    inputs["timings"]["mps"]["kernel"] = [3.4, 3.4]
-    data = record.append_record("attention", directory=tmp_path, **inputs)
+    ratio = data["variants"]["mlx"]["kernel"]["ratio_vs_baseline"]
+    assert ratio == record.median_ratio_ci([1, 2, 3], [3, 4, 5])
+    # Paired mlx ratios 1/3, 1/2, 3/5 are all below 1; mps ratios 2/3 and 1
+    # include 1, so a resample of only the second pair has a median ratio of 1.
     assert data["speed_gate"] == {"mlx": True, "mps": False}
+    inputs["timings"]["mps"]["kernel"] = [2.7, 3.6]
+    data = record.append_record("attention", directory=tmp_path, **inputs)
+    assert data["speed_gate"] == {"mlx": True, "mps": True}
     assert len((tmp_path / "attention.jsonl").read_text().splitlines()) == 2
 
 
@@ -121,21 +126,75 @@ def test_record_rejects_mismatched_baseline(tmp_path, inputs):
     assert not list(tmp_path.iterdir())
 
 
+def _paired(ratios, start=3.7, stop=4.5):
+    """v1 samples spread from ``start`` to ``stop`` ms, and candidates at ``ratios`` of them."""
+    count = len(ratios)
+    baseline = [start + (stop - start) * ((7 * i) % count) / (count - 1) for i in range(count)]
+    return [ratio * value for ratio, value in zip(ratios, baseline)], baseline
+
+
+def _jitter(center, spread, count=102):
+    """Deterministic ratios within ``center +- spread``."""
+    return [center + spread * (((5 * i) % 11) - 5) / 5 for i in range(count)]
+
+
 @pytest.mark.parametrize(
-    ("kernel_median", "passed"),
+    ("ratios", "passed"),
     [
-        (1.9, True),  # below v1's median and below its p10
-        (2.0, False),  # on v1's p10: inside the range
-        (2.5, False),  # below v1's median but inside p10 to p90
-        (3.0, False),  # equal to v1's median
-        (3.5, False),  # slower than v1
-        (4.1, False),  # above v1's p90
+        (_jitter(0.95, 0.02), True),  # clear 5% gain: CI entirely below 1
+        (_jitter(1.0, 0.03), False),  # CI straddles 1
+        (_jitter(1.05, 0.02), False),  # CI above 1
+        ([1.0] * 102, False),  # identical timings: CI is exactly 1
     ],
 )
-def test_speed_gate_rule(kernel_median, passed):
-    baseline = {"median_ms": 3.0, "p10_ms": 2.0, "p90_ms": 4.0}
-    kernel = {"median_ms": kernel_median, "p10_ms": 0.0, "p90_ms": 9.0}
-    assert record.speed_gate(kernel, baseline) is passed
+def test_speed_gate_rule(ratios, passed):
+    candidate, baseline = _paired(ratios)
+    ratio = record.median_ratio_ci(candidate, baseline)
+    assert ratio["ci_low"] <= ratio["median_ratio"] <= ratio["ci_high"]
+    assert record.speed_gate(ratio) is passed
+    if passed:
+        assert ratio["ci_high"] < 1
+    elif ratios[0] != 1.0:
+        assert ratio["ci_high"] >= 1
+
+
+def test_paired_gate_detects_gain_the_old_gate_missed():
+    candidate, baseline = _paired(_jitter(0.95, 0.02))
+    values = sorted(baseline)
+    candidate_median = sorted(candidate)[len(candidate) // 2]
+    # The old rule: median below v1's and outside v1's p10 to p90 range.
+    assert record.percentile(values, 0.1) <= candidate_median <= record.percentile(values, 0.9)
+    ratio = record.median_ratio_ci(candidate, baseline)
+    assert ratio["median_ratio"] == pytest.approx(0.95)
+    assert ratio["ci_high"] < 0.97
+    assert record.speed_gate(ratio) is True
+
+
+def test_median_ratio_ci_is_deterministic_and_documented():
+    candidate, baseline = _paired(_jitter(1.0, 0.03))
+    first = record.median_ratio_ci(candidate, baseline)
+    assert first == record.median_ratio_ci(candidate, baseline)
+    assert first["resamples"] == record.BOOTSTRAP_RESAMPLES == 10_000
+    assert first["seed"] == record.BOOTSTRAP_SEED
+    assert first["level"] == record.CI_LEVEL == 0.95
+    assert first["pairs"] == 102
+    assert first["ci_low"] < 1 <= first["ci_high"]
+    other = record.median_ratio_ci(candidate, baseline, seed=1, resamples=500)
+    assert other["seed"] == 1 and other["resamples"] == 500
+
+
+@pytest.mark.parametrize(
+    ("candidate", "baseline", "message"),
+    [
+        ([1.0, 2.0], [1.0], "same length"),
+        ([], [], "same length"),
+        ([1.0, 0.0], [1.0, 1.0], "positive finite"),
+        ([1.0, float("nan")], [1.0, 1.0], "positive finite"),
+    ],
+)
+def test_median_ratio_ci_rejects_bad_pairs(candidate, baseline, message):
+    with pytest.raises(ValueError, match=message):
+        record.median_ratio_ci(candidate, baseline)
 
 
 def test_table_preserves_order_and_escapes_cells(tmp_path, monkeypatch, inputs):

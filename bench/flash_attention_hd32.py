@@ -14,14 +14,18 @@ Six variants run on the same bf16 inputs at ``[1, 8, 5184, 32]``:
 For each framework, every warmup and timed iteration calls v1, the candidate
 and the built-in once each, in an order taken from ``BALANCED_SCHEDULE`` (a
 Williams design: every variant takes every position, and follows each other
-variant, equally often over one six-iteration cycle). Each prints median, p10 and p90 ms per call and TFLOP/s, with
-FLOPs = ``4 * B * H * Lq * Lk * D``. Errors are measured against
+variant, equally often over one six-iteration cycle). Each prints median,
+min, p10 and p90 ms per call and TFLOP/s, with FLOPs =
+``4 * B * H * Lq * Lk * D``. Errors are measured against
 ``reference.sdpa.sdpa_reference`` in fp32 on the bf16-rounded inputs.
 
-The speed gate passes for a framework when the candidate's median is below
-v1's and outside v1's p10 to p90 range in the same run. It is printed and
-recorded; correctness alone decides the exit code. Results are appended
-through ``bench/record.py`` only with ``--record``.
+Samples from the same iteration are paired. The speed gate passes for a
+framework when the bootstrap 95% CI of the median ``candidate / v1`` ratio lies
+entirely below 1 (``record.median_ratio_ci``: 10,000 resamples, fixed seed).
+The same paired CI of the MPS candidate over MPS SDPA is reported as the M3
+target check but does not gate. Both are printed and recorded; correctness
+alone decides the exit code. Results are appended through
+``bench/record.py`` only with ``--record``.
 
 Run on Apple silicon from the repository root:
 
@@ -46,6 +50,7 @@ for _path in (_REPO / "python" / "src", _REPO):
 from bench.record import (  # noqa: E402
     BASELINE,
     add_record_arguments,
+    median_ratio_ci,
     percentile,
     record_if_requested,
     speed_gate,
@@ -107,15 +112,24 @@ def bytes_per_call(
 
 
 def summarize(samples: list[float], flops: int) -> dict:
-    """Median, p10 and p90 in ms, and TFLOP/s at the median."""
+    """Median, min, p10 and p90 in ms, and TFLOP/s at the median."""
     values = sorted(samples)
     median = statistics.median(values)
     return {
         "median_ms": median,
+        "min_ms": values[0],
         "p10_ms": percentile(values, 0.1),
         "p90_ms": percentile(values, 0.9),
         "tflops": flops / (median * 1e9),
     }
+
+
+def format_ratio(ratio: dict) -> str:
+    """``median [low, high] (95% CI, N resamples)`` for a :func:`median_ratio_ci` result."""
+    return (
+        f"{ratio['median_ratio']:.4f} [{ratio['ci_low']:.4f}, {ratio['ci_high']:.4f}] "
+        f"({ratio['level']:.0%} CI, {ratio['resamples']} resamples)"
+    )
 
 
 def v1_launch(q_shape, kv_shape) -> tuple[list[int], int, int]:
@@ -204,6 +218,8 @@ def time_interleaved(calls: dict, synchronize, warmup: int, iterations: int) -> 
     iteration starts, in the order given by :func:`balanced_schedule`. The
     schedule continues from warmup into the timed iterations. Each timed call
     is synchronized before and after, so samples are per-call GPU wall time.
+    Samples are in iteration order, so index ``i`` of every variant comes from
+    the same iteration and the variants can be paired.
     """
     outputs = dict.fromkeys(calls)
     samples = {name: [] for name in calls}
@@ -324,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     expected = _reference(*rounded)
 
     def mlx_sync(out):
+        # time_interleaved's pre-timer synchronize(None) is a no-op here on purpose; MPS syncs.
         if out is not None:
             mx.eval(out)
 
@@ -386,8 +403,8 @@ def main(argv: list[str] | None = None) -> int:
         f"flops/call={flops:.4g} iterations={args.iterations} warmup={args.warmup}"
     )
     print(
-        f"{'variant':<12} {'median ms':>10} {'p10 ms':>10} {'p90 ms':>10} {'TFLOP/s':>8} "
-        f"{'max abs err':>12} {'mean abs err':>13}"
+        f"{'variant':<12} {'median ms':>10} {'min ms':>10} {'p10 ms':>10} {'p90 ms':>10} "
+        f"{'TFLOP/s':>8} {'max abs err':>12} {'mean abs err':>13}"
     )
     stats = {
         (framework, variant): summarize(timings[framework][variant], flops)
@@ -400,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
             errors = reference_errors[(framework, variant)]
             print(
                 f"{framework + ' ' + LABELS[variant]:<12} {row['median_ms']:>10.3f} "
-                f"{row['p10_ms']:>10.3f} {row['p90_ms']:>10.3f} {row['tflops']:>8.3f} "
+                f"{row['min_ms']:>10.3f} {row['p10_ms']:>10.3f} {row['p90_ms']:>10.3f} "
+                f"{row['tflops']:>8.3f} "
                 f"{errors['max_abs_error']:>12.3e} {errors['mean_abs_error']:>13.3e}"
             )
     print("Errors are against sdpa_reference (fp32) on the bf16-rounded inputs.")
@@ -417,15 +435,20 @@ def main(argv: list[str] | None = None) -> int:
     for framework in FRAMEWORKS:
         kernel = stats[(framework, "kernel")]
         baseline = stats[(framework, BASELINE)]
-        gate = speed_gate(kernel, baseline)
+        ratio = median_ratio_ci(timings[framework]["kernel"], timings[framework][BASELINE])
         print(
-            f"{framework} kernel speed gate: {'passed' if gate else 'not passed'} "
-            f"(median {kernel['median_ms']:.3f} ms vs v1 median {baseline['median_ms']:.3f} ms, "
-            f"v1 p10-p90 {baseline['p10_ms']:.3f}-{baseline['p90_ms']:.3f} ms); "
+            f"{framework} kernel speed gate: {'passed' if speed_gate(ratio) else 'not passed'} "
+            f"(kernel/v1 median ratio {format_ratio(ratio)}); "
             f"speedup {mps_sdpa / kernel['median_ms']:.2f}x vs MPS SDPA, "
             f"{mlx_sdpa / kernel['median_ms']:.2f}x vs MLX SDPA, "
             f"{baseline['median_ms'] / kernel['median_ms']:.2f}x vs v1"
         )
+    ratio = median_ratio_ci(timings["mps"]["kernel"], timings["mps"]["builtin"])
+    print(
+        f"mps kernel vs MPS SDPA (M3 target check, not a gate): "
+        f"median ratio {format_ratio(ratio)}; "
+        f"{'below' if ratio['ci_high'] < 1 else 'not below'} 1"
+    )
 
     _, threads, threadgroup = launch_geometry(q_shape, kv_shape, kv_shape)
     record = record_if_requested(

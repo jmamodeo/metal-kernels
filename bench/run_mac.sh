@@ -10,8 +10,9 @@
 # benchmark interleaves the frozen v1 baseline, the candidate and the built-in
 # on every iteration, in a balanced rotating order (102 timed plus 12 warmup by
 # default), and prints the max and mean abs error against sdpa_reference,
-# median/p10/p90 ms per call for all six variants, the speed gate against v1,
-# and the git SHA. Nothing is committed.
+# median/min/p10/p90 ms per call for all six variants, the speed gate (paired
+# bootstrap 95% CI of the median candidate/v1 ratio entirely below 1), the
+# reported candidate/MPS SDPA ratio CI, and the git SHA. Nothing is committed.
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 || -z "$1" ]]; then
