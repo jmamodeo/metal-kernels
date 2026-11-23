@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from metal_kernels.loader import metal_source
 
 from bench import record
 
@@ -242,25 +243,39 @@ def test_flash_attention_bench_samples_are_equal_length_and_in_iteration_order(m
         assert values == pytest.approx(expected)
 
 
-def test_flash_attention_bench_frozen_v1_baseline():
+def test_flash_attention_bench_frozen_v6_baseline():
     bench = _load_flash_attention_bench()
     source = bench.BASELINE_SOURCE.read_text()
-    assert bench.BASELINE_SOURCE == _REPO / "bench" / "baselines" / "flash_attention_hd32_v1.metal"
+    assert bench.BASELINE_SOURCE == _REPO / "bench" / "baselines" / "flash_attention_hd32_v6.metal"
+    assert bench.BASELINE_VERSION == bench.LABELS[record.BASELINE] == "v6"
     assert source.startswith("// SPDX-License-Identifier: Apache-2.0\n")
+    assert "// FlashAttention for head dim 32, version 6." in source
     assert "constant constexpr uint FA_HD32_BLOCK_Q = 32;" in source
     assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
     assert "inline void flash_attention_hd32_block(" in source
     assert "FA_HD32_INSTANTIATE(bfloat, ushort)" in source
-    assert "threadgroup float" not in source and "threadgroup_barrier" not in source
-    # v1 rescales O and the running sum on every block, unconditionally.
-    assert "o_tiles[t].thread_elements() *= correction;" in source
-    assert "running_sum = running_sum * correction + fa_hd32_row_sum(block_sum);" in source
-    dims, threads, threadgroup = bench.v1_launch((1, 8, 5184, 32), (1, 8, 5184, 32))
+    # v6 stages one K and one V block (8 KB bf16, 16 KB fp32), with a barrier
+    # after the copy and another before the next one.
+    assert "constant constexpr uint FA_HD32_KV_ELEMENTS = 2 * FA_HD32_BLOCK_ELEMENTS;" in source
+    assert "FA_HD32_BUFFER_ELEMENTS" not in source
+    assert source.count("threadgroup_barrier(mem_flags::mem_threadgroup)") == 2
+    assert bench.BASELINE_THREADGROUP_MEMORY_BYTES == 8192
+    assert "FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));" in bench._BASELINE_MLX_BODY
+    # The baseline is frozen: the candidate kernel is a different source.
+    assert source != metal_source("flash_attention_hd32")
+    dims, threads, threadgroup = bench.baseline_launch((1, 8, 5184, 32), (1, 8, 5184, 32))
     assert dims == [41472, 8, 5184, 5184, 0, 0, 0, 0, 0]
     assert (threads, threadgroup) == (8 * 162 * 128, 128)
-    dims, threads, threadgroup = bench.v1_launch((1, 8, 201, 32), (1, 8, 5184, 32))
+    dims, threads, threadgroup = bench.baseline_launch((1, 8, 201, 32), (1, 8, 5184, 32))
     assert dims[:4] == [1608, 8, 201, 5184]
     assert (threads, threadgroup) == (8 * 7 * 128, 128)
+
+
+def test_flash_attention_frozen_v1_baseline_is_kept():
+    # No longer timed, but kept unchanged for the earlier records that cite it.
+    source = (_REPO / "bench" / "baselines" / "flash_attention_hd32_v1.metal").read_text()
+    assert "inline void flash_attention_hd32_block(" in source
+    assert "threadgroup float" not in source and "threadgroup_barrier" not in source
 
 
 def test_public_kernel_has_one_source_and_no_version_argument(monkeypatch):
