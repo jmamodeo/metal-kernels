@@ -92,9 +92,8 @@ default design text; other versions pass theirs as a second argument:
 
 ## Recording kernel versions
 
-Every PR that changes a kernel must add a measured line from John's M3 Max
-and regenerate its table. Do not commit invented numbers. The first record will
-be FlashAttention hd32 v0, after its Metal kernel and benchmark land.
+Each kernel version has a measured line in the JSONL record, and its table is
+regenerated from that record.
 
 Each kernel benchmark should accept `--record --version LABEL --design "TEXT"`.
 Without `--record`, it must print and behave as before. Use the shared helpers:

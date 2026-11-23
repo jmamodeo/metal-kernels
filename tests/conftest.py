@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Skip Metal execution tests on hosts that are not macOS."""
+"""Skip Metal execution tests when no Metal device is available."""
 
 from __future__ import annotations
 
 import pytest
-from metal_kernels.platform import host_is_macos
+from metal_kernels.platform import metal_device_available
 
 
 def pytest_collection_modifyitems(config, items):
-    if host_is_macos():
+    if metal_device_available():
         return
-    skip = pytest.mark.skip(reason="Metal kernels run only on macOS")
+    skip = pytest.mark.skip(reason="no Metal device is available")
     for item in items:
         if "metal" in item.keywords:
             item.add_marker(skip)

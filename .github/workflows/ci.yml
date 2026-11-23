@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  macos:
+    name: macOS
+    # Apple silicon. macos-14 was retired in November 2026; the current
+    # arm64 hosted image is macos-26 (also macos-latest).
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show runner
+        run: uname -m && sw_vers && xcodebuild -version && python3 --version && swift --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python tools
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install ruff
+          python3 -m pip install -e "./python[dev]"
+
+      - name: Ruff
+        run: |
+          python3 -m ruff check .
+          python3 -m ruff format --check .
+
+      - name: Pytest
+        # tests/conftest.py skips tests marked `metal` when
+        # metal_device_available() is false (non-macOS, or macOS with no
+        # default Metal device). This macos-26 arm64 runner does have a
+        # Metal device. This job does not install MLX or PyTorch, so the
+        # Python Metal tests skip via importorskip. Tolerances and the
+        # tests themselves are unchanged.
+        run: pytest
+
+      - name: Swift
+        # GPU-launching XCTest cases throw XCTSkip when
+        # MTLCreateSystemDefaultDevice() is nil. On this runner a Metal
+        # device is available, so those cases run.
+        run: |
+          swift build
+          swift test

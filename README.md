@@ -1,18 +1,20 @@
 # metal-kernels
 
+[![CI](https://github.com/jmamodeo/metal-kernels/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/metal-kernels/actions/workflows/ci.yml)
+
 A community collection of Apple Metal GPU kernels for Apple silicon. Each kernel ships with a NumPy reference that defines the math, Python bindings through MLX and PyTorch MPS, a native Swift host, and benchmarks against the built-in framework op.
 
 Kernels are chosen by profiling real models and writing a custom kernel only where the built-in Metal ops fall short. The first workload profiled is Meta's [SAM 3](https://github.com/facebookresearch/sam3) (Segment Anything 3). Its integration and shape benchmarks live in `metal_kernels.integrations.sam3` and `bench/sam3_shapes/`.
 
-The registry holds one kernel, [`flash_attention_hd32`](kernels/flash_attention_hd32/README.md): Metal FlashAttention for head dim 32, the only kernel this collection will ship. Version 7.1 is the current kernel. It launches from MLX and PyTorch MPS, and from the [Swift host](swift/README.md). On one measured configuration — Apple M3 Max, macOS 26.7.3, torch 2.15.0, MLX 0.32.4, at `[1, 8, 5184, 32]` bf16 — it is about 2% faster than MPS SDPA (paired MPS kernel/SDPA median ratio 0.9828, 95% CI [0.9808, 0.9849]; 102 pairs, 10,000 resamples).
+On the SAM 3 detector encoder attention at `[1, 8, 5184, 32]` bf16, MLX is about 2× slower than PyTorch: 9.74 ms versus 4.29 ms per call on an M3 Max (PyTorch 2.15.0, MLX 0.32.4). At head dim 32, MLX's fused SDPA is not used; `mx.fast.scaled_dot_product_attention` falls back to an unfused matmul → softmax → matmul path. Those figures are from the [shape timings](bench/sam3_shapes/results/m3-max-2026-11-18.md) and the [design note](docs/flash-attention-hd32-design.md).
+
+The collection currently has one kernel, [`flash_attention_hd32`](kernels/flash_attention_hd32/README.md): Metal FlashAttention for head dim 32. More kernels get added when profiling finds a gap. Version 7.1 is the current kernel. It launches from MLX and PyTorch MPS, and from the [Swift host](swift/README.md). On one measured configuration — Apple M3 Max, macOS 26.7.3, torch 2.15.0, MLX 0.32.4, at `[1, 8, 5184, 32]` bf16 — it is about 2% faster than MPS SDPA (paired MPS kernel/SDPA median ratio 0.9828, 95% CI [0.9808, 0.9849]; 102 pairs, 10,000 resamples).
 
 ```python
 from metal_kernels.flash_attention import flash_attention_hd32
 
 out = flash_attention_hd32(q, k, v, bias=None, scale=None, backend="mlx")  # or backend="mps"
 ```
-
-The earlier conv3x3 kernel was dropped on Nov 22, 2026 by John's decision.
 
 ## Layout
 
@@ -76,7 +78,7 @@ pytest
 python -m metal_kernels
 ```
 
-`pytest` skips Metal execution tests when the host is not macOS. `python -m metal_kernels` prints the registry.
+`pytest` skips Metal execution tests when no Metal device is available. `python -m metal_kernels` prints the registry.
 
 An editable install from a checkout is the supported way to find `kernels/`. The loader also honors `METAL_KERNELS_ROOT` when that variable points at the `kernels` directory. A non-editable wheel does not yet vendor the `.metal` sources.
 
@@ -106,7 +108,17 @@ SwiftPM prints `Found unhandled resource at <repo>/kernels` while doing this. Th
 
 On one measured configuration — Apple M3 Max, macOS 26.7.3, torch 2.15.0, MLX 0.32.4, at `[1, 8, 5184, 32]` bf16 — the current kernel is about 2% faster than MPS SDPA (paired MPS kernel/SDPA median ratio 0.9828, 95% CI [0.9808, 0.9849]; 102 pairs, 10,000 resamples). Version 7.1 was recorded at 306bcea. bf16 passed the 1.01 gate versus the frozen v7 (MLX 1.0060 [1.0033, 1.0078], MPS 1.0072 [1.0045, 1.0094]). fp32 versus the frozen v6 passed on MLX (1.0036 [1.0022, 1.0071]) and did not pass on MPS (1.0081 [1.0046, 1.0101]; 1.0101 > 1.01). That MPS fp32 miss was accepted as a documented one-off waiver; the rationale is the source-identical v6 fp32 loop and restored Swift fp32 latency (3.990 ms versus v6's 3.985 ms), not proof of equivalence from the CI. The general 1.01 gate is unchanged. This is not a claim that fp32 outperforms v6.
 
-The reviewable table is generated from `bench/results/flash_attention_hd32.jsonl` (append-only recorded runs) by:
+Selected recorded runs at that same bf16 shape, taken from the committed JSONL. v1 is the merged tiled revision, not the earlier 40 ms staging trial. The paired MPS kernel/SDPA intervals are the same figures already recorded for v6, v7 and v7.1.
+
+| Version | MLX kernel ms | PyTorch kernel ms | MPS kernel/SDPA (bf16) |
+| --- | ---: | ---: | --- |
+| v0 | 60.035 | 60.424 | — |
+| v1 | 4.123 | 4.168 | — |
+| v6 | 3.837 | 3.803 | 0.9913 [0.9880, 0.9928] |
+| v7 | 3.812 | 3.824 | 0.9798 [0.9788, 0.9807] |
+| v7.1 (current) | 3.797 | 3.794 | 0.9828 [0.9808, 0.9849] |
+
+The full reviewable table is generated from `bench/results/flash_attention_hd32.jsonl` (append-only recorded runs, including trials that were not kept) by:
 
 ```bash
 python tools/results_table.py flash_attention_hd32
@@ -115,8 +127,6 @@ python tools/results_table.py flash_attention_hd32
 That writes [bench/results/flash_attention_hd32.md](bench/results/flash_attention_hd32.md). The same table is in the [kernel README](kernels/flash_attention_hd32/README.md#results). The JSONL is committed with the table so the numbers can be regenerated.
 
 ## Contributing
-
-Every merge into main needs John Amodeo's OK, and John is the sole commit author/committer (no co-author trailers).
 
 Copy [kernels/_template](kernels/_template/README.md) to `kernels/<name>/` and add the NumPy reference, the test, and the hosts described there. Keep the shader in `kernels/` only.
 
