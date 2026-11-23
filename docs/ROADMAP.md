@@ -20,7 +20,7 @@ Put a NumPy implementation in `reference/<name>.py`. NumPy only: no MLX and no P
 
 Add `kernels/<name>/<name>.metal` and a `README.md` that states inputs, outputs, shapes, dtypes, and threadgroup assumptions.
 
-Call that source from Python with MLX `mx.fast.metal_kernel` and/or PyTorch MPS `torch.mps.compile_shader`. Compare outputs to the NumPy reference on Apple silicon, and record the tolerance in the kernel README. The pytest that launches the kernel uses the `metal` marker so it skips when the host is not macOS.
+Call that source from Python with MLX `mx.fast.metal_kernel` and/or PyTorch MPS `torch.mps.compile_shader`. Compare outputs to the NumPy reference on Apple silicon, and record the tolerance in the kernel README. The pytest that launches the kernel uses the `metal` marker so it skips when no Metal device is available.
 
 ### 3. Swift host
 
@@ -32,11 +32,9 @@ Add a script under `bench/` that times the kernel against the built-in framework
 
 ## Kernels
 
-The earlier conv3x3 kernel was dropped on Nov 22, 2026 by John's decision. It is no longer in this repository.
-
 ### FlashAttention hd32
 
-Fused FlashAttention-style scaled dot-product attention for head dim 32. The SAM 3 detector encoder calls it at `[1, 8, 5184, 32]` in bfloat16, six times per image. This is the only kernel planned for the collection.
+Fused FlashAttention-style scaled dot-product attention for head dim 32. The SAM 3 detector encoder calls it at `[1, 8, 5184, 32]` in bfloat16, six times per image. The collection currently has this one kernel; more get added when profiling finds a gap.
 
 | Step | Status |
 | --- | --- |
@@ -69,7 +67,7 @@ Figures below are same-record medians on the M3 Max at `[1, 8, 5184, 32]` bf16 u
 
 Traced in [sam3-op-inventory.md](sam3-op-inventory.md). One random-init forward pass at 1008px is 6.379e12 rank FLOPs: matmul 75.8%, attention 18.4%, convolution 5.7%. The vision encoder is 84.6% of that. The write-up has the shapes, the CUDA blockers, and the source review of PyTorch MPS 2.15.0 and MLX 0.32.4.
 
-MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU. The M3 Max timings in [bench/sam3_shapes/results](../bench/sam3_shapes/results/m3-max-2026-11-18.md) show no CPU fallbacks. The only kernel being written is FlashAttention hd32: MLX is about 2x slower than PyTorch on the detector attention at head size 32, and MLX fused SDPA falls back at that head dim. A 3×3 convolution kernel was started earlier because PyTorch MPS is about 2x slower than MLX on the 3×3 and transposed 2×2 convolutions; John dropped that kernel on Nov 22, 2026. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
+MPS and MLX already have matmul, SDPA, convolution, layer norm, and GELU. The M3 Max timings in [bench/sam3_shapes/results](../bench/sam3_shapes/results/m3-max-2026-11-18.md) show no CPU fallbacks. The collection currently has one kernel, FlashAttention hd32: MLX is about 2x slower than PyTorch on the detector attention at head size 32, and MLX fused SDPA falls back at that head dim. More kernels get added when profiling finds a gap. A 3×3 convolution kernel was started earlier because PyTorch MPS is about 2x slower than MLX on the 3×3 and transposed 2×2 convolutions; that kernel is no longer in the repository. `aten._addmm_activation` is a call to split into linear plus GELU, not a new kernel, until a profile says otherwise.
 
 #### MPS baseline
 

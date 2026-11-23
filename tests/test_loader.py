@@ -16,6 +16,7 @@ from metal_kernels import (
     metal_source,
 )
 from metal_kernels.__main__ import main
+from metal_kernels.platform import metal_device_available
 
 
 def test_import_does_not_load_gpu_frameworks():
@@ -31,6 +32,11 @@ def test_import_does_not_load_gpu_frameworks():
 
 def test_host_flag_matches_platform():
     assert host_is_macos() is (sys.platform == "darwin")
+
+
+def test_metal_device_available_is_false_off_macos():
+    if not host_is_macos():
+        assert metal_device_available() is False
 
 
 def test_checkout_registers_flash_attention_hd32(monkeypatch):

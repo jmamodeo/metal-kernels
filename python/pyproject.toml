@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "metal-kernels"
 version = "0.0.0"
-description = "Metal kernel sources for Apple silicon. The only planned kernel is FlashAttention for head dim 32."
+description = "Metal kernel sources for Apple silicon. The collection currently has FlashAttention for head dim 32."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
