@@ -53,11 +53,7 @@ def list_kernels() -> list[str]:
     ``kernels/_template``. A directory counts only when it contains a
     ``.metal`` file.
     """
-    names = [
-        child.name
-        for child in kernels_root().iterdir()
-        if _is_kernel_dir(child)
-    ]
+    names = [child.name for child in kernels_root().iterdir() if _is_kernel_dir(child)]
     return sorted(names)
 
 
@@ -73,13 +69,10 @@ def kernel_dir(name: str) -> Path:
 def metal_source_path(name: str) -> Path:
     """Path of the single ``.metal`` file in the kernel directory."""
     directory = kernel_dir(name)
-    sources = sorted(
-        path for path in directory.glob("*.metal") if path.is_file()
-    )
+    sources = sorted(path for path in directory.glob("*.metal") if path.is_file())
     if len(sources) != 1:
         raise FileNotFoundError(
-            f"Kernel {name!r} must contain exactly one .metal file; "
-            f"found {len(sources)}."
+            f"Kernel {name!r} must contain exactly one .metal file; found {len(sources)}."
         )
     return sources[0]
 
@@ -104,6 +97,4 @@ def _validate_name(name: str) -> None:
 def _is_kernel_dir(path: Path) -> bool:
     if not path.is_dir() or path.name.startswith(("_", ".")):
         return False
-    return any(
-        child.is_file() and child.suffix == ".metal" for child in path.iterdir()
-    )
+    return any(child.is_file() and child.suffix == ".metal" for child in path.iterdir())

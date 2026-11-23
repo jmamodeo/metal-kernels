@@ -48,8 +48,14 @@ args = parser.parse_args()
 validate_record_arguments(parser, args)
 # Run and print the benchmark as usual, then only if requested:
 record_if_requested(
-    args, kernel_name, shape=shape, dtype=dtype, flops=flops_per_call,
-    timings=timings, bytes_per_call=bytes_per_call, correctness=correctness,
+    args,
+    kernel_name,
+    shape=shape,
+    dtype=dtype,
+    flops=flops_per_call,
+    timings=timings,
+    bytes_per_call=bytes_per_call,
+    correctness=correctness,
     launch_config=launch_config,
 )
 ```
