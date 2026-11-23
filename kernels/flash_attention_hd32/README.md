@@ -6,7 +6,7 @@ Fused scaled dot-product attention for head dim 32, written for the SAM 3 detect
 
 Version 3: the v1 tiled `simdgroup_matrix` kernel with the query block raised from 32 to 64 rows and eight simdgroups (256 threads) per threadgroup. Each simdgroup still owns 8 query rows and the key block stays at 64, so per-simdgroup registers match v1 while each (batch, head) re-reads K and V 81 times instead of 162 at `L = 5184`. The interface is unchanged: the same Python API, buffers, `dims` layout, bias semantics and tolerances. Target: faster than v1 (4.12 ms MLX path, 4.17 ms MPS path at `[1, 8, 5184, 32]` bf16) with error no worse than MPS SDPA in the same record; goal at or under MPS SDPA. `bench/run_mac.sh v3` tests, benchmarks and records it.
 
-Version 0, the per-row online-softmax kernel (one simdgroup per query row), passed the `metal` tests on the M3 Max. The first v1 revision (16-row threadgroups, K/V staged as fp32 in 16 KB of threadgroup memory, fp32 GEMMs) passed the `metal` tests on the M3 Max but ran at 40.0 ms against MLX SDPA's 8.40 ms. The current revision removes the threadgroup staging, doubles the query block to 32 rows and feeds bf16 tiles to the GEMMs; on the M3 Max v1 passes the `metal` tests and runs at a 4.12 ms MLX-path median against MLX SDPA's 8.41 ms in the same record (2.04×), with error equal to MPS SDPA's.
+Version 1, the previous kernel (32 query rows, 128 threads), runs at 4.12 ms (MLX path) against MLX SDPA's 8.41 ms in the same record (2.04×), and 4.17 ms (MPS path) against MPS SDPA's 3.91 ms, with max abs error equal to MPS SDPA's. Earlier versions and a recorded v2 trial are in [docs/ROADMAP.md](../../docs/ROADMAP.md).
 
 ## What it computes
 
