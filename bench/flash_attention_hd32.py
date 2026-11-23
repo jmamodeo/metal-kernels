@@ -469,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
             "key_block": KEY_BLOCK,
             "rows_per_simdgroup": 8,
             "threadgroup_memory_bytes": THREADGROUP_MEMORY_BYTES,
-            "kv_load": "device to registers",
+            "kv_load": "device to threadgroup (bf16), shared by 4 simdgroups",
             "mma_inputs": "bf16 Q, K, V; fp32 P",
             "mma_accumulator": "fp32",
             "baseline": {

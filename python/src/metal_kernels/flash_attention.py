@@ -6,10 +6,10 @@
 MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
-Version 1 is the tiled ``simdgroup_matrix`` kernel from the design note:
-one threadgroup of four simdgroups per 32 query rows of one (batch, head),
-K/V walked in 64-key blocks loaded straight from device memory into
-registers, with no threadgroup memory.
+Version 6 is the current kernel: the tiled ``simdgroup_matrix`` kernel
+from the design note, one threadgroup of four simdgroups per 32 query
+rows of one (batch, head), with each 64-key K/V block copied once into
+threadgroup memory, in the input dtype, and shared by the four simdgroups.
 """
 
 from __future__ import annotations
@@ -27,21 +27,25 @@ HEAD_DIM = 32
 QUERY_BLOCK = 32
 KEY_BLOCK = 64
 THREADGROUP_SIZE = QUERY_BLOCK // 8 * 32
-# K and V go straight from device memory to registers.
-THREADGROUP_MEMORY_BYTES = 0
+# One 64-key K block and one V block staged in bf16 (fp32 inputs stage twice
+# this). Mirrors FA_HD32_KV_ELEMENTS in the shader.
+THREADGROUP_MEMORY_BYTES = 2 * KEY_BLOCK * HEAD_DIM * 2
 BACKENDS = ("mlx", "mps")
 
 # Buffer offsets in the shader are 32-bit, and MLX grids are 32-bit ints.
 _MAX_ELEMENTS = 2**31 - 1
 
-# The MLX-generated kernel calls the block function in the shared source.
+# The MLX-generated kernel declares the threadgroup K/V stage and calls the
+# block function in the shared source.
 _MLX_BODY = """
+    FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));
     flash_attention_hd32_block(
         fa_hd32_bits(q),
         fa_hd32_bits(k),
         fa_hd32_bits(v),
         fa_hd32_bits(bias),
         fa_hd32_bits(out),
+        kv,
         fa_hd32_params(dims, scale[0]),
         threadgroup_position_in_grid.x,
         thread_index_in_threadgroup);

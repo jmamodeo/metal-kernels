@@ -219,6 +219,7 @@ def test_flash_attention_bench_samples_are_equal_length_and_in_iteration_order(m
         offset = bench.VARIANTS.index(name) / 10
 
         def call():
+            # Assumes 3 calls (v1, candidate, builtin) per iteration.
             if not log or len(log) % 3 == 0:
                 iteration["index"] += 1
             log.append(name)
