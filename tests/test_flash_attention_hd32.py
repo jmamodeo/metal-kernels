@@ -59,6 +59,21 @@ def test_kernel_is_registered(monkeypatch):
     assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
 
 
+def test_softmax_scale_is_folded_into_q():
+    source = metal_source(KERNEL_NAME)
+    assert "const float qk_scale = params.scale * M_LOG2E_F;" in source
+    assert "Io::scaled(q_lo[t], qk_scale)" in source
+    assert "Io::scaled(q_hi[t], qk_scale)" in source
+    # No per-score multiply after Q Kᵀ, and the -inf mask test stays on the
+    # raw bias, ahead of the finite log2(e) scaling.
+    assert "* qk_scale" not in source
+    mask = source.index("if (fa_hd32_is_neg_inf(b))")
+    assert mask < source.index("score += fa_hd32_finite(b * M_LOG2E_F);")
+    # The correction is applied on every block, as in v1.
+    assert "o_tiles[t].thread_elements() *= correction;" in source
+    assert "running_sum = running_sum * correction + fa_hd32_row_sum(block_sum);" in source
+
+
 def test_launch_constants_match_the_shader():
     # 32 query rows per threadgroup, 8 per simdgroup: four simdgroups. K and
     # V go straight to registers, so no threadgroup memory.

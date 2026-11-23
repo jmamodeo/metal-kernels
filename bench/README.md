@@ -59,7 +59,7 @@ the benchmark with `--record --version <version>`, and prints the git SHA:
 bench/run_mac.sh v1
 ```
 
-It uses `./.venv` when present. `v0` and `v1` have a default design text;
+It uses `./.venv` when present. `v0`, `v1` and `v5` have a default design text;
 later versions pass theirs as a second argument: `bench/run_mac.sh v3 "TEXT"`. The script appends to
 `bench/results/flash_attention_hd32.jsonl` and commits nothing.
 

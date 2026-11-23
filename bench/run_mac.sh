@@ -28,6 +28,9 @@ case "$version" in
     v1)
         default_design="tiled simdgroup_matrix: one threadgroup of 4 simdgroups per 32 query rows, 8 rows per simdgroup, 64-key K/V blocks loaded per lane from device into registers as vectors (no threadgroup memory, no barriers), bf16 simdgroup_matrix inputs with fp32 S and O accumulators (P stays fp32), exp2 online softmax with shuffle-xor row reductions"
         ;;
+    v5)
+        default_design="v1 tiling kept (32 query rows, 4 simdgroups, 64-key blocks, device-to-register K/V, bf16 GEMM inputs, fp32 P, rescale every block); scale * log2(e) folded into Q once at load, per-score scale multiply removed, exp2 throughout"
+        ;;
     *)
         default_design=""
         ;;

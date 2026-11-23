@@ -6,10 +6,11 @@
 MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
-Version 1 is the tiled ``simdgroup_matrix`` kernel from the design note:
-one threadgroup of four simdgroups per 32 query rows of one (batch, head),
+Version 5 is the v1 tiled ``simdgroup_matrix`` kernel from the design note
+(one threadgroup of four simdgroups per 32 query rows of one (batch, head),
 K/V walked in 64-key blocks loaded straight from device memory into
-registers, with no threadgroup memory.
+registers, with no threadgroup memory), with ``scale * log2(e)`` folded into
+Q once at load.
 """
 
 from __future__ import annotations

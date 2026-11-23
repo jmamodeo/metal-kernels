@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// FlashAttention for head dim 32, version 1.
+// FlashAttention for head dim 32, version 5.
 //
 // softmax(Q Kᵀ * scale + bias) V with an online softmax, so the score matrix
 // is never written to memory. One threadgroup of four simdgroups owns 32
@@ -8,7 +8,8 @@
 // walked in blocks of 64 keys, loaded by each lane straight from device
 // memory in the input dtype; there is no threadgroup memory. Q, K, V, bias
 // and O share one dtype, bf16 or fp32. Softmax and accumulation are fp32; a
-// bf16 O is rounded once at the end.
+// bf16 O is rounded once at the end. The softmax scale times log2(e) is
+// folded into Q once at load, so Q Kᵀ gives exp2-ready scores.
 //
 // This file is the only copy of the shader. Both hosts compile this text:
 // - PyTorch MPS (torch.mps.compile_shader) calls `flash_attention_hd32_bfloat`
@@ -76,16 +77,18 @@ inline float fa_hd32_load(const constant float* data, uint index) {
     return data[index];
 }
 
-// fp32 -> bf16, round to nearest even. Integer ops only, so it holds under
-// fast math. NaN stays NaN.
-inline void fa_hd32_store(device ushort* data, uint index, float value) {
+// fp32 -> bf16 bits, round to nearest even. Integer ops only, so it holds
+// under fast math. NaN stays NaN.
+inline ushort fa_hd32_bf16_bits(float value) {
     uint bits = as_type<uint>(value);
     if ((bits & 0x7F800000u) == 0x7F800000u && (bits & 0x007FFFFFu) != 0u) {
-        data[index] = ushort((bits >> 16) | 0x0040u);
-        return;
+        return ushort((bits >> 16) | 0x0040u);
     }
     bits += 0x7FFFu + ((bits >> 16) & 1u);
-    data[index] = ushort(bits >> 16);
+    return ushort(bits >> 16);
+}
+inline void fa_hd32_store(device ushort* data, uint index, float value) {
+    data[index] = fa_hd32_bf16_bits(value);
 }
 inline void fa_hd32_store(device float* data, uint index, float value) {
     data[index] = value;
@@ -172,7 +175,9 @@ inline float fa_hd32_row_sum(float value) {
 // Per-storage-type load helpers and the element type fed to the GEMMs. bf16
 // tiles are simdgroup_bfloat8x8 when the compiler has `bfloat` (Metal 3.1);
 // otherwise bf16 is widened to fp32 tiles. fp32 inputs use fp32 tiles.
-// Accumulators (S and O) are always fp32.
+// Accumulators (S and O) are always fp32. `scaled` multiplies an element by
+// a factor in fp32 before it becomes a GEMM element, rounding a bf16 tile
+// element once.
 template <typename T>
 struct FaHd32Io;
 
@@ -186,6 +191,9 @@ struct FaHd32Io<float> {
     static inline mma_type element(float value) {
         return value;
     }
+    static inline mma_type scaled(float value, float factor) {
+        return value * factor;
+    }
 };
 
 template <>
@@ -195,10 +203,16 @@ struct FaHd32Io<ushort> {
     static inline mma_type element(ushort bits) {
         return as_type<bfloat>(bits);
     }
+    static inline mma_type scaled(ushort bits, float factor) {
+        return as_type<bfloat>(fa_hd32_bf16_bits(as_type<float>(uint(bits) << 16) * factor));
+    }
 #else
     typedef float mma_type;
     static inline mma_type element(ushort bits) {
         return as_type<float>(uint(bits) << 16);
+    }
+    static inline mma_type scaled(ushort bits, float factor) {
+        return as_type<float>(uint(bits) << 16) * factor;
     }
 #endif
     typedef ushort4 vec4;
@@ -220,11 +234,12 @@ struct FaHd32Io<ushort> {
 // threadgroup memory and no barriers are used: each simdgroup is
 // independent.
 //
-// Simdgroup s owns query rows [8 s, 8 s + 8) of the block. Q and the fp32 O
-// accumulator stay in registers as four 8x8 tiles each. Keys are walked in
-// blocks of FA_HD32_BLOCK_K. Each lane loads its K and V tile elements
-// straight from device memory (zero past the last key), then the simdgroup
-// computes S = Q Kᵀ, updates the online softmax and accumulates O += P V.
+// Simdgroup s owns query rows [8 s, 8 s + 8) of the block. Q, prescaled by
+// scale * log2(e), and the fp32 O accumulator stay in registers as four 8x8
+// tiles each. Keys are walked in blocks of FA_HD32_BLOCK_K. Each lane loads
+// its K and V tile elements straight from device memory (zero past the last
+// key), then the simdgroup computes S = Q Kᵀ, updates the online softmax and
+// accumulates O += P V.
 //
 // The head dimension is split as d = 4 i + t across the four tiles t, with
 // i the index inside a tile. Both GEMMs sum or index over d consistently, so
@@ -271,11 +286,13 @@ inline void flash_attention_hd32_block(
                           query * params.bias_stride_q;
     const bool load_bias = params.has_bias && query_valid;
     const float neg_flt_max = as_type<float>(FA_HD32_NEG_FLT_MAX_BITS);
-    // Fold the softmax scale into log2(e) so the exponentials are exp2.
+    // Fold the softmax scale into log2(e), and that into Q once, so S = Q Kᵀ
+    // is already in log2 units and the exponentials are exp2. K, V and P are
+    // not scaled.
     const float qk_scale = params.scale * M_LOG2E_F;
 
-    // Q tile t, element (r, c + e) is Q[r][4 (c + e) + t]: the lane's eight
-    // elements are Q[r][4 c .. 4 c + 8).
+    // Q tile t, element (r, c + e) is qk_scale * Q[r][4 (c + e) + t]: the
+    // lane's eight elements are Q[r][4 c .. 4 c + 8).
     simdgroup_matrix<M, 8, 8> q_tiles[FA_HD32_D_TILES];
     simdgroup_float8x8 o_tiles[FA_HD32_D_TILES];
     {
@@ -288,8 +305,8 @@ inline void flash_attention_hd32_block(
         }
         FA_HD32_UNROLL
         for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
-            q_tiles[t].thread_elements()[0] = Io::element(q_lo[t]);
-            q_tiles[t].thread_elements()[1] = Io::element(q_hi[t]);
+            q_tiles[t].thread_elements()[0] = Io::scaled(q_lo[t], qk_scale);
+            q_tiles[t].thread_elements()[1] = Io::scaled(q_hi[t], qk_scale);
             o_tiles[t] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
         }
     }
@@ -328,8 +345,8 @@ inline void flash_attention_hd32_block(
             }
         }
 
-        // Scale, add the bias, mask, and take the block's row max over
-        // valid keys.
+        // Add the bias, mask, and take the block's row max over valid keys.
+        // The -inf mask test reads the raw bias, before any scaling.
         bool valid[FA_HD32_K_TILES][2];
         float block_max = neg_flt_max;
         FA_HD32_UNROLL
@@ -337,7 +354,7 @@ inline void flash_attention_hd32_block(
             FA_HD32_UNROLL
             for (uint e = 0; e < 2; ++e) {
                 const uint key = key_start + j * FA_HD32_TILE + coord.x + e;
-                float score = s_tiles[j].thread_elements()[e] * qk_scale;
+                float score = s_tiles[j].thread_elements()[e];
                 bool ok = full_block || key < params.key_length;
                 if (ok && load_bias) {
                     const float b = fa_hd32_load(bias, bias_row + key * params.bias_stride_k);
