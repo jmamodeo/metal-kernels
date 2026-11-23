@@ -31,7 +31,7 @@ fixed order, or a plain cyclic rotation, would keep v1 running after the
 slower built-in more often than the candidate does. Defaults are 102 timed
 iterations plus 12 warmup (`--iterations`, `--warmup`), whole cycles, so the
 default run is exactly balanced; other counts that are not multiples of 6 print
-a note. It prints median, p10 and p90 ms per call and
+a note. It prints median, min, p10 and p90 ms per call and
 TFLOP/s (FLOPs = `4 * B * H * Lq * Lk * D`) for all six variants, plus the max
 and mean abs error of each against `sdpa_reference` in fp32 on the bf16-rounded
 inputs, and the candidate's speedup over MPS SDPA, MLX SDPA and v1.
@@ -39,10 +39,17 @@ inputs, and the candidate's speedup over MPS SDPA, MLX SDPA and v1.
 A kernel passes correctness when it is within `rtol = 2e-2`, `atol = 1e-2` of
 both the reference and the built-in, and its max abs error is no larger than
 PyTorch MPS SDPA's. Correctness alone decides the exit code. Separately, the
-speed gate passes for a framework only if, in the same run, the candidate's
-median is below v1's median and outside v1's p10 to p90 range. It is printed
-and recorded; `bench/run_mac.sh v1` times v1 against itself and is not
-expected to pass it. The recorded `bytes_per_call` is the compulsory traffic
+speed gate pairs the candidate and v1 samples from the same iteration of each
+framework's interleave and takes the per-iteration ratio `candidate_ms / v1_ms`.
+It passes for a framework only if the bootstrap 95% confidence interval of the
+median ratio lies entirely below 1 (`record.median_ratio_ci`: percentile
+bootstrap, 10,000 resamples, fixed seed 0, so the result is reproducible).
+p10, median and p90 are still printed and recorded, but do not decide the gate.
+The same paired interval for the MPS candidate over MPS SDPA, from the MPS
+interleave, is printed as the M3 target check; it does not gate. No interval is
+formed across the MLX and MPS loops, which run separately. The gate is printed
+and recorded; `bench/run_mac.sh v1` times v1 against itself, so its interval
+should straddle 1 and it is not expected to pass. The recorded `bytes_per_call` is the compulsory traffic
 (q, k and v read once, O written once) for every variant.
 
 On the Mac, one command installs the `mac` extra, runs `pytest -m metal`, runs
@@ -94,10 +101,14 @@ with the bytes read and written per call for each variant. Median, min,
 linearly interpolated p10/p90, iterations, TFLOP/s, GB/s, and kernel speedup
 against the corresponding built-in are calculated from those measurements.
 With a baseline, the record also has the baseline's statistics, the kernel's
-`speedup_vs_baseline`, and `speed_gate`, which maps each framework to
-`record.speed_gate`: `true` only if the kernel's median is below the
-baseline's and outside the baseline's p10 to p90 range. `speed_gate` is `null`
-when no baseline was timed.
+`speedup_vs_baseline`, its `ratio_vs_baseline`, and `speed_gate`, which maps
+each framework to `record.speed_gate`: `true` only if the `ci_high` of
+`ratio_vs_baseline` is below 1. `speed_gate` is `null` when no baseline was
+timed. Each kernel entry also has `ratio_vs_builtin`, reported only. Both ratio
+entries come from `record.median_ratio_ci` on the samples paired by index, so
+every variant of a framework must have the same number of samples in iteration
+order, and hold `median_ratio`, `ci_low`, `ci_high`, `level`, `resamples`,
+`seed` and `pairs`.
 `shape` and the optional `launch_config` are JSON-serializable dictionaries;
 the latter can capture query/key blocks, threads, and threadgroup memory
 (`threadgroup_memory_bytes` is 0 for `flash_attention_hd32`, which uses none).
