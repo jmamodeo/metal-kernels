@@ -6,13 +6,12 @@
 MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
-Version 6 is the shipped kernel: the tiled ``simdgroup_matrix`` kernel
+Version 7 is the current kernel: the tiled ``simdgroup_matrix`` kernel
 from the design note, one threadgroup of four simdgroups per 32 query
 rows of one (batch, head), with each 64-key K/V block copied once into
 threadgroup memory, in the input dtype, and shared by the four simdgroups.
-The source here is the v7 candidate under test, which double buffers that
-stage: the next block's device loads are issued before the current block's
-math, with one barrier per block.
+The stage is double buffered: the next block's device loads are issued
+before the current block's math, with one barrier per block.
 """
 
 from __future__ import annotations

@@ -62,8 +62,8 @@ the benchmark with `--record --version <version>`, and prints the git SHA:
 bench/run_mac.sh v7
 ```
 
-It uses `./.venv` when present. v6 is the shipped kernel and v7 the candidate
-under test; v7 is kept only if the paired v7/v6 median-ratio bootstrap 95% CI lies entirely below 1 on both MLX and MPS and its max abs error is no worse than MPS SDPA's; otherwise it is recorded as a negative result. `v0`, `v1`, `v6` and
+It uses `./.venv` when present. v7 is the current kernel, timed against the
+frozen v6; a later candidate is kept only if its paired median-ratio bootstrap 95% CI against the frozen baseline lies entirely below 1 on both MLX and MPS and its max abs error is no worse than MPS SDPA's; otherwise it is recorded as a negative result. `v0`, `v1`, `v6` and
 `v7` have a default design text; other versions pass theirs as a second argument:
 `bench/run_mac.sh v3 "TEXT"`. The script appends to
 `bench/results/flash_attention_hd32.jsonl` and commits nothing.
