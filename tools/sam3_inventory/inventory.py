@@ -309,6 +309,7 @@ def _op_name(func) -> str:
 def install_module_stack(model: torch.nn.Module, tracer: CallTracer):
     hooks = []
     for name, module in model.named_modules():
+
         def pre(_module, _inputs, name=name):
             tracer.stack.append(name)
             if re.search(r"blocks\.\d+$", name):
@@ -650,7 +651,12 @@ def trace_stage(tracer: CallTracer, stage: str, fn):
         result = fn()
     elapsed = time.perf_counter() - started
     log(f"stage {stage} done in {elapsed:.1f}s  counter_flops={counter.get_total_flops()}")
-    return result, flop_counts_to_json(counter.get_flop_counts()), dict(counter.get_unsupported_ops()), elapsed
+    return (
+        result,
+        flop_counts_to_json(counter.get_flop_counts()),
+        dict(counter.get_unsupported_ops()),
+        elapsed,
+    )
 
 
 def build_image_model(redirect: CudaFactoryRedirect):
@@ -772,6 +778,7 @@ def run_tracker(tracker, feats: dict, tracer: CallTracer) -> dict:
         num_frames=2,
         run_mem_encoder=True,
     )
+
     def project_high_res():
         # Sam3TrackerBase.forward_image runs these 1x1 convs before tracking.
         # The raw FPN is 256 channels; conv_s0/conv_s1 match the mask decoder's
@@ -805,7 +812,10 @@ def run_tracker(tracker, feats: dict, tracer: CallTracer) -> dict:
     init_out, flops_init, unsupported_init, seconds_init = trace_stage(
         tracer,
         "tracker_init",
-        lambda: (project_high_res(), tracker.track_step(frame_idx=0, is_init_cond_frame=True, **cloned_common()))[1],
+        lambda: (
+            project_high_res(),
+            tracker.track_step(frame_idx=0, is_init_cond_frame=True, **cloned_common()),
+        )[1],
     )
     output_dict["cond_frame_outputs"][0] = init_out
     unpatched = None
@@ -874,7 +884,9 @@ def summarize(records: list[dict], stage_flops: dict) -> dict:
         for module, total in leaf_modules(modules).items():
             region = region_of(module, stage)
             region_counter[f"{stage}:{region}"] += total
-            leaf_rows.append({"stage": stage, "module": module, "region": region, "counter_flops": total})
+            leaf_rows.append(
+                {"stage": stage, "module": module, "region": region, "counter_flops": total}
+            )
 
     families = collections.defaultdict(
         lambda: {
@@ -952,7 +964,9 @@ def summarize(records: list[dict], stage_flops: dict) -> dict:
                 "top_ops": bucket["ops"].most_common(8),
             }
         )
-    family_rows.sort(key=lambda row: (row["rank_flops"], row["extra_flops"], row["bytes"]), reverse=True)
+    family_rows.sort(
+        key=lambda row: (row["rank_flops"], row["extra_flops"], row["bytes"]), reverse=True
+    )
 
     bytes_total = sum(row["bytes"] for row in family_rows)
     rank_total = sum(row["rank_flops"] for row in family_rows)
@@ -982,7 +996,9 @@ def summarize(records: list[dict], stage_flops: dict) -> dict:
             slot["extra_flops"] += row["extra_flops"]
             slot["bytes"] += row["bytes"]
             slot["modules"] += 1
-    grouped_rows = sorted(grouped.values(), key=lambda row: (row["formula_flops"], row["bytes"]), reverse=True)
+    grouped_rows = sorted(
+        grouped.values(), key=lambda row: (row["formula_flops"], row["bytes"]), reverse=True
+    )
     shape_rows.sort(key=lambda row: (row["formula_flops"], row["bytes"]), reverse=True)
     leaf_rows.sort(key=lambda row: row["counter_flops"], reverse=True)
     return {
@@ -1264,7 +1280,9 @@ def main() -> None:
             "and the tracker still run. The call count is pin_memory_identity_calls."
         ),
         "tracker_build_warnings": tracker_notes,
-        "tracker_frame2_unpatched": None if not tracker_result else tracker_result["unpatched_frame2"],
+        "tracker_frame2_unpatched": None
+        if not tracker_result
+        else tracker_result["unpatched_frame2"],
         "tracker_frame2_patch": (
             "Tensor.cuda patched to identity so the memory-conditioned step could run on CPU. "
             "The unpatched call is recorded separately and raises."
