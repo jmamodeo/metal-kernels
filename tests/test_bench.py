@@ -243,32 +243,98 @@ def test_flash_attention_bench_samples_are_equal_length_and_in_iteration_order(m
         assert values == pytest.approx(expected)
 
 
-def test_flash_attention_bench_frozen_v6_baseline():
+def test_flash_attention_bench_baselines_per_dtype():
     bench = _load_flash_attention_bench()
-    source = bench.BASELINE_SOURCE.read_text()
-    assert bench.BASELINE_SOURCE == _REPO / "bench" / "baselines" / "flash_attention_hd32_v6.metal"
-    assert bench.BASELINE_VERSION == bench.LABELS[record.BASELINE] == "v6"
+    assert bench.DTYPES == ("bfloat16", "float32")
+    # bf16 is paired against the frozen v7, fp32 against the frozen v6.
+    assert bench.BASELINE_VERSIONS == {"bfloat16": "v7", "float32": "v6"}
+    assert bench.labels("bfloat16")[record.BASELINE] == "v7"
+    assert bench.labels("float32")[record.BASELINE] == "v6"
+    assert bench.TOLERANCE == {"bfloat16": (2e-2, 1e-2), "float32": (1e-3, 1e-4)}
+    assert bench.MPS_ENTRY == {
+        "bfloat16": "flash_attention_hd32_bfloat",
+        "float32": "flash_attention_hd32_float",
+    }
+    assert set(bench.BASELINE_SOURCES) == set(bench.BASELINE_VERSIONS.values())
+    # Pass rules on the paired candidate/baseline median-ratio CI.
+    bf16, fp32 = bench.GATES["bfloat16"], bench.GATES["float32"]
+    # Both dtypes gate on the CI upper bound being at most RATIO_LIMIT.
+    assert bench.RATIO_LIMIT == 1.01
+    straddles = {"ci_low": 0.99, "ci_high": 1.005}
+    below = {"ci_low": 0.97, "ci_high": 0.99}
+    noise = {"ci_low": 1.0036, "ci_high": 1.0058}
+    above = {"ci_low": 1.0679, "ci_high": 1.0730}
+    for gate in (bf16, fp32):
+        assert (gate(straddles), gate(below), gate(noise), gate(above)) == (True, True, True, False)
+        assert gate({"ci_low": 1.0, "ci_high": 1.01}) is True
+        assert gate({"ci_low": 1.0, "ci_high": 1.0101}) is False
+    assert "v7" in bench.GATE_RULES["bfloat16"] and "v6" in bench.GATE_RULES["float32"]
+    assert all("<= 1.01" in rule for rule in bench.GATE_RULES.values())
+
+
+def _check_frozen_baseline(bench, version):
+    source = bench.BASELINE_SOURCES[version].read_text()
+    path = _REPO / "bench" / "baselines" / f"flash_attention_hd32_{version}.metal"
+    assert bench.BASELINE_SOURCES[version] == path
     assert source.startswith("// SPDX-License-Identifier: Apache-2.0\n")
-    assert "// FlashAttention for head dim 32, version 6." in source
     assert "constant constexpr uint FA_HD32_BLOCK_Q = 32;" in source
     assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
     assert "inline void flash_attention_hd32_block(" in source
     assert "FA_HD32_INSTANTIATE(bfloat, ushort)" in source
+    assert "FA_HD32_INSTANTIATE(float, float)" in source
+    assert "FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));" in bench._BASELINE_MLX_BODY
+    # The baseline is frozen: the candidate kernel is a different source.
+    assert source != metal_source("flash_attention_hd32")
+    return source
+
+
+def test_flash_attention_bench_frozen_v6_baseline():
+    bench = _load_flash_attention_bench()
+    source = _check_frozen_baseline(bench, "v6")
+    assert "// FlashAttention for head dim 32, version 6." in source
     # v6 stages one K and one V block (8 KB bf16, 16 KB fp32), with a barrier
     # after the copy and another before the next one.
     assert "constant constexpr uint FA_HD32_KV_ELEMENTS = 2 * FA_HD32_BLOCK_ELEMENTS;" in source
     assert "FA_HD32_BUFFER_ELEMENTS" not in source
     assert source.count("threadgroup_barrier(mem_flags::mem_threadgroup)") == 2
-    assert bench.BASELINE_THREADGROUP_MEMORY_BYTES == 8192
-    assert "FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));" in bench._BASELINE_MLX_BODY
-    # The baseline is frozen: the candidate kernel is a different source.
-    assert source != metal_source("flash_attention_hd32")
     dims, threads, threadgroup = bench.baseline_launch((1, 8, 5184, 32), (1, 8, 5184, 32))
     assert dims == [41472, 8, 5184, 5184, 0, 0, 0, 0, 0]
     assert (threads, threadgroup) == (8 * 162 * 128, 128)
     dims, threads, threadgroup = bench.baseline_launch((1, 8, 201, 32), (1, 8, 5184, 32))
     assert dims[:4] == [1608, 8, 201, 5184]
     assert (threads, threadgroup) == (8 * 7 * 128, 128)
+
+
+def test_flash_attention_bench_frozen_v7_baseline():
+    bench = _load_flash_attention_bench()
+    source = _check_frozen_baseline(bench, "v7")
+    assert "// FlashAttention for head dim 32, version 7.\n" in source
+    # v7 double buffers the stage for every dtype (16 KB bf16, 32 KB fp32),
+    # with one barrier after the first copy and one per later block.
+    assert "constant constexpr uint FA_HD32_KV_ELEMENTS = 2 * FA_HD32_BUFFER_ELEMENTS;" in source
+    assert "threadgroup T kv[FA_HD32_KV_ELEMENTS];" in source
+    assert "FaHd32Stage" not in source
+    assert source.count("threadgroup_barrier(mem_flags::mem_threadgroup)") == 2
+
+
+def _function_body(source, signature):
+    start = source.index(signature) + len(signature)
+    return source[start : source.index("\n}\n", start) + 3]
+
+
+def test_flash_attention_kernel_loops_are_v7_and_v6_verbatim():
+    # bf16 runs the frozen v7 loop and fp32 the frozen v6 loop, unchanged.
+    source = metal_source("flash_attention_hd32")
+    baseline = "inline void flash_attention_hd32_block(\n"
+    for size, version in ((2, "v7"), (4, "v6")):
+        frozen = (
+            _REPO / "bench" / "baselines" / f"flash_attention_hd32_{version}.metal"
+        ).read_text()
+        loop = f"inline void fa_hd32_block_loop(\n    FaHd32ElementSize<{size}>,\n"
+        assert _function_body(source, loop) == _function_body(frozen, baseline)
+    v6 = (_REPO / "bench" / "baselines" / "flash_attention_hd32_v6.metal").read_text()
+    stage = "inline void fa_hd32_stage_block("
+    assert _function_body(source, stage) == _function_body(v6, stage)
 
 
 def test_flash_attention_frozen_v1_baseline_is_kept():
