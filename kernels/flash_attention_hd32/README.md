@@ -4,9 +4,7 @@ Fused scaled dot-product attention for head dim 32, written for the SAM 3 detect
 
 ## Status
 
-Version 1: the tiled `simdgroup_matrix` kernel from the design note. It replaces the v0 per-row shader body and keeps the v0 interface: the same Python API, buffers, `dims` layout, bias semantics and tolerances. Target: an MLX-path median under 8.60 ms at `[1, 8, 5184, 32]` bf16 and a speedup above 1 against MLX SDPA in the same record; goal about 6 ms.
-
-Version 0, the per-row online-softmax kernel (one simdgroup per query row), passed the `metal` tests on the M3 Max. The first v1 revision (16-row threadgroups, K/V staged as fp32 in 16 KB of threadgroup memory, fp32 GEMMs) passed the `metal` tests on the M3 Max but ran at 40.0 ms against MLX SDPA's 8.40 ms. The current revision removes the threadgroup staging, doubles the query block and feeds bf16 tiles to the GEMMs; on the M3 Max it passes the `metal` tests and runs at a 4.12 ms MLX-path median against MLX SDPA's 8.41 ms in the same record (2.04×), with error equal to MPS SDPA's. `bench/run_mac.sh v1` tests, benchmarks and records it.
+Version 1: the tiled `simdgroup_matrix` kernel (32 query rows, 128 threads, 64-key K/V blocks loaded from device into registers, bf16 GEMM inputs, fp32 P). It keeps the v0 interface: the same Python API, buffers, `dims` layout, bias semantics and tolerances. On the M3 Max at `[1, 8, 5184, 32]` bf16 it runs at 4.12 ms (MLX path) against MLX SDPA's 8.41 ms in the same record (2.04×), and 4.17 ms (MPS path) against MPS SDPA's 3.91 ms, with max abs error equal to MPS SDPA's. `bench/run_mac.sh v1` tests, benchmarks and records it. Earlier versions and a recorded v2 trial are in [docs/ROADMAP.md](../../docs/ROADMAP.md).
 
 ## What it computes
 
