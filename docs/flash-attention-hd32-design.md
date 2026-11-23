@@ -1,6 +1,6 @@
 # FlashAttention at head dim 32: design note
 
-Linear: MTL-10 (parent MTL-8). This note started as the design before any implementation; [Our hd32 kernel plan](#our-hd32-kernel-plan) now records what shipped in v0, v1 and v2.
+Linear: MTL-10 (parent MTL-8). This note started as the design before any implementation; [Our hd32 kernel plan](#our-hd32-kernel-plan) now records what shipped in v0 and v1.
 
 ## Why
 
@@ -36,12 +36,12 @@ The target is Q, K, V `[1, 8, 5184, 32]` in bf16, output bf16, forward only, wit
 What shipped, by version:
 
 - **v0:** per-row online softmax. One simdgroup per query row, one lane per head-dim column, `simd_sum` dot products, fp32 math, no threadgroup memory.
-- **v1:** the tiled `simdgroup_matrix` kernel below with Bk = 64: 32 query rows and 128 threads per threadgroup, K/V loaded from device memory straight into registers, no threadgroup memory, bf16 GEMM inputs, fp32 P.
-- **v2:** v1 unchanged except Bk = 128.
+- **v1 (current):** the tiled `simdgroup_matrix` kernel below with Bk = 64: 32 query rows and 128 threads per threadgroup, K/V loaded from device memory straight into registers, no threadgroup memory, bf16 GEMM inputs, fp32 P.
+- **v2:** Bk = 128 was tried and was slower on the M3 Max (see [ROADMAP](ROADMAP.md)); it was not kept. The kernel is v1.
 
 1. **Grid.** There is one threadgroup per (batch · head, 32-query block): 5184/32 = 162 per head, 1296 in total, each with 128 threads (4 simdgroups × 8 rows). This is MFA's M1/M2 parallelization of 32 rather than its Apple9 value of 16. We add a head index instead of single-head dispatch.
-2. **Traversal block.** v1 used Bk = 64; v2 uses Bk = 128, the MFA Apple9 value, which halves the softmax/rescale steps per query block at the target shape (81 key blocks → 41). 5184 = 40 × 128 + 64, so the target shape has a 64-key tail, handled by the edge-mask path that also covers the cross-attention shape and the tests.
-3. **Registers.** Per thread, D = 32 is four 8×8 tiles across. That gives Q cached at 4 tiles × 2 = 8 values, O at 8 fp32, S/P for Bk = 128 at 16 tiles × 2 = 32 fp32, plus m and l. *Estimate:* about 50–60 live 32-bit values per thread before temporaries. Confirm spilling with the Xcode GPU capture.
+2. **Traversal block.** The current kernel uses Bk = 64. 5184 = 81 × 64, so the target shape has no key-block tail. The edge-mask path is kept for other lengths, the cross-attention shape, and the tests. v2 tried Bk = 128 (the MFA Apple9 value) and was slower, likely from register pressure (16 S/P tiles instead of 8) and the 64-key tail that 5184 then required; that change was reverted.
+3. **Registers.** Per thread, D = 32 is four 8×8 tiles across. That gives Q cached at 4 tiles × 2 = 8 values, O at 8 fp32, S/P for Bk = 64 at 8 tiles × 2 = 16 fp32, plus m and l. *Estimate:* about 35–40 live 32-bit values per thread before temporaries. MFA caches both Q and O at this D, so spilling is not expected at Bk = 64. v2's Bk = 128 raised S/P to 16 tiles (32 fp32) and was slower, consistent with register pressure.
 4. **Threadgroup memory.** None, in every version. As MFA does on Apple9, each lane loads its K and V tile elements straight from device memory into registers; the four simdgroups of a threadgroup read the same K/V block at about the same time, so the repeats hit the cache. No barriers.
 5. **bf16 handling.** The GEMM inputs Q, K and V are `bfloat` tiles when the compiler defines `__HAVE_BFLOAT__` (Metal 3.1); otherwise bf16 is widened to fp32 by bit placement (`as_type<float>(uint(bits) << 16)`). S, P and the O accumulator are fp32, so P is never rounded. O is written as bf16 once at the end. Unlike MFA, we don't write O in FP32, because the SAM 3 caller wants bf16.
 6. **Softmax.** Follow MFA: fold the scale into `log2(e)·scale`, use exp2, apply the shuffle-xor row reductions, rescale O only when the max rises, and mask with the finite-negative sentinel. A row whose bias is −inf everywhere must output 0, matching the MTL-9 reference, so guard `1/l` when `l == 0`.
@@ -59,4 +59,4 @@ What shipped, by version:
 ## Open questions
 
 - The shader uses `bfloat` simdgroup matrices when the compiler defines `__HAVE_BFLOAT__` and widens to fp32 tiles otherwise. Which path each host takes on the M3 Max is not yet confirmed (`verbose=True` on MLX, or a GPU capture).
-- v1 and v2 use 32 rows per threadgroup. 16 rows with direct device→register loads has not been measured.
+- v1 uses 32 rows per threadgroup. 16 rows with direct device→register loads has not been measured.

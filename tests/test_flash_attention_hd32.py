@@ -35,8 +35,8 @@ TOLERANCE = {"bfloat16": (2e-2, 1e-2), "float32": (1e-3, 1e-4)}
 SAM3_ENCODER = (1, 8, 5184, 5184)
 SAM3_CROSS = (1, 8, 201, 5184)
 
-# (batch, heads, query_length, key_length). 64, 100 and 1000 leave a key
-# tail that is not a multiple of 128.
+# (batch, heads, query_length, key_length). 100 and 1000 leave a key tail
+# that is not a multiple of 64.
 SMALL_SHAPES = [
     (1, 1, 1, 1),
     (1, 2, 5, 7),
@@ -56,7 +56,7 @@ def test_kernel_is_registered(monkeypatch):
     assert "FA_HD32_INSTANTIATE(float, float)" in source
     assert "inline void flash_attention_hd32_block(" in source
     assert "constant constexpr uint FA_HD32_BLOCK_Q = 32;" in source
-    assert "constant constexpr uint FA_HD32_BLOCK_K = 128;" in source
+    assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
 
 
 def test_launch_constants_match_the_shader():
@@ -128,7 +128,7 @@ def test_launch_geometry_rejects_bad_shapes():
         launch_geometry(q, (1, 2, 0, 32), (1, 2, 0, 32))
     with pytest.raises(ValueError, match="at most"):
         launch_geometry((1, 1, 2**26, 32), (1, 1, 1, 32), (1, 1, 1, 32))
-    # One query per head still launches a full 128-thread group.
+    # One query per head still launches a full 64-thread group.
     with pytest.raises(ValueError, match="at most"):
         launch_geometry((2**25, 1, 1, 32), (2**25, 1, 1, 32), (2**25, 1, 1, 32))
 
@@ -249,7 +249,7 @@ def _check(run, arrays, dtype, scale=None):
 
 
 # Query tail: 50 is not a multiple of the 32-row query block. Key tail:
-# 5184 + 17 is not a multiple of the 128-key block.
+# 5184 + 17 is not a multiple of the 64-key block.
 TAIL_QUERY_LENGTH = 50
 TAIL_KEY_LENGTH = 5184 + 17
 TAIL_SHAPES = [
