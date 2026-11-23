@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// FlashAttention for head dim 32, version 1.
+// FlashAttention for head dim 32, version 4.
 //
 // softmax(Q Kᵀ * scale + bias) V with an online softmax, so the score matrix
 // is never written to memory. One threadgroup of four simdgroups owns 32
@@ -355,10 +355,21 @@ inline void flash_attention_hd32_block(
         }
         block_max = fa_hd32_row_max(block_max);
 
-        // Online softmax. correction is exp2(0) = 1 when the max does not
-        // rise, and the difference is clamped so it never becomes -inf.
+        // Online softmax. O and the running sum are rescaled only when some
+        // row of the simdgroup raised its max; the test is uniform across
+        // the simdgroup, so the matrix operations still see all 32 lanes.
+        // correction is exp2(0) = 1 for a row whose max did not rise, and the
+        // difference is clamped so it never becomes -inf.
         const float new_max = max(running_max, block_max);
-        const float correction = exp2(fa_hd32_finite(running_max - new_max));
+        const bool rescale = simd_any(new_max > running_max);
+        if (rescale) {
+            const float correction = exp2(fa_hd32_finite(running_max - new_max));
+            running_sum *= correction;
+            FA_HD32_UNROLL
+            for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
+                o_tiles[t].thread_elements() *= correction;
+            }
+        }
         running_max = new_max;
 
         float block_sum = 0.0f;
@@ -372,15 +383,11 @@ inline void flash_attention_hd32_block(
                 block_sum += p;
             }
         }
-        running_sum = running_sum * correction + fa_hd32_row_sum(block_sum);
+        running_sum += fa_hd32_row_sum(block_sum);
 
-        // O = O * correction + P V. P stays fp32. V tile t, element
-        // (r, c + e) is V[key r][4 (c + e) + t]: the lane's eight elements
-        // are V[key r][4 c .. 4 c + 8).
-        FA_HD32_UNROLL
-        for (uint t = 0; t < FA_HD32_D_TILES; ++t) {
-            o_tiles[t].thread_elements() *= correction;
-        }
+        // O += P V. P stays fp32. V tile t, element (r, c + e) is
+        // V[key r][4 (c + e) + t]: the lane's eight elements are
+        // V[key r][4 c .. 4 c + 8).
         FA_HD32_UNROLL
         for (uint j = 0; j < FA_HD32_K_TILES; ++j) {
             const uint key = key_start + j * FA_HD32_TILE + coord.y;
