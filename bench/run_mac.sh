@@ -5,19 +5,23 @@
 #   bench/run_mac.sh <version> [design]
 #   bench/run_mac.sh swift
 #
-# `swift` checks the Swift host instead: swift build, swift test (the GPU
+# `swift` checks only the Swift host: swift build, swift test (the GPU
 # correctness run), then the release-built timing mode, FlashAttentionHD32Bench,
 # at [1, 8, 5184, 32] in bf16 and fp32. It prints and records nothing else.
 #
-# Installs the Mac extra, runs the metal tests, then runs
-# bench/flash_attention_hd32.py with --record. The record goes to
-# bench/results/flash_attention_hd32.jsonl through bench/record.py. The
-# benchmark interleaves the frozen v6 baseline, the candidate and the built-in
-# on every iteration, in a balanced rotating order (102 timed plus 12 warmup by
-# default), and prints the max and mean abs error against sdpa_reference,
-# median/min/p10/p90 ms per call for all six variants, the speed gate (paired
-# bootstrap 95% CI of the median candidate/v6 ratio entirely below 1), the
-# reported candidate/MPS SDPA ratio CI, and the git SHA. Nothing is committed.
+# A version installs the Mac extra, runs the metal tests, runs
+# bench/flash_attention_hd32.py with --record, then runs the same Swift step,
+# all in one invocation. The records go to
+# bench/results/flash_attention_hd32.jsonl through bench/record.py, one per
+# dtype. For each dtype the benchmark interleaves a frozen baseline (v7 for
+# bf16, v6 for fp32), the candidate and the built-in on every iteration, in a
+# balanced rotating order (102 timed plus 12 warmup by default), and prints the
+# max and mean abs error against sdpa_reference, median/min/p10/p90 ms per call
+# for all six variants, and the paired bootstrap 95% CI of the median
+# candidate/baseline ratio (10,000 resamples, seed 0). Both the bf16 gate
+# (against v7) and the fp32 gate (against v6) pass when that CI's upper bound
+# is at most 1.01. The bf16 candidate/MPS
+# SDPA ratio CI is reported too, and the git SHA. Nothing is committed.
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 || -z "$1" ]]; then
@@ -26,6 +30,12 @@ if [[ $# -lt 1 || $# -gt 2 || -z "$1" ]]; then
 fi
 version="$1"
 
+run_swift() {
+    swift build
+    swift test
+    swift run -c release FlashAttentionHD32Bench
+}
+
 if [[ "$version" == "swift" ]]; then
     if [[ $# -ne 1 ]]; then
         echo "usage: bench/run_mac.sh swift" >&2
@@ -33,9 +43,7 @@ if [[ "$version" == "swift" ]]; then
     fi
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
     echo "git SHA: $(git rev-parse HEAD)"
-    swift build
-    swift test
-    swift run -c release FlashAttentionHD32Bench
+    run_swift
     echo "git SHA: $(git rev-parse HEAD)"
     exit 0
 fi
@@ -52,6 +60,9 @@ case "$version" in
         ;;
     v7)
         default_design="v6 with the K/V stage double buffered in threadgroup memory (16 KB for bf16, 32 KB for fp32): the next 64-key block's device loads are issued into registers before the current block's math and stored into the other buffer after it, one barrier per block instead of two"
+        ;;
+    v7.1)
+        default_design="bf16 runs v7's loop unchanged (double-buffered 16 KB K/V stage, one barrier per block); fp32 runs v6's loop unchanged (single-buffer 16 KB stage, each block copied straight into it, a barrier before and after the math), picked by element size in the one shader"
         ;;
     *)
         default_design=""
@@ -75,4 +86,5 @@ echo "git SHA: $(git rev-parse HEAD)"
 "$python" -m pip install -e "./python[mac]"
 "$python" -m pytest -m metal
 "$python" bench/flash_attention_hd32.py --record --version "$version" --design "$design"
+run_swift
 echo "git SHA: $(git rev-parse HEAD)"
