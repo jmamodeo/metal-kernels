@@ -8,16 +8,42 @@ Shaders) on a named machine, shape, and dtype.
 
 ## FlashAttention hd32
 
-`flash_attention_hd32.py` times four variants on the same bf16 inputs at
-`[1, 8, 5184, 32]`: our kernel through MLX and through PyTorch MPS,
-`mx.fast.scaled_dot_product_attention`, and
-`torch.nn.functional.scaled_dot_product_attention` on MPS. It prints median,
-p10 and p90 ms per call and TFLOP/s (FLOPs = `4 * B * H * Lq * Lk * D`), plus
-the max and mean abs error of each variant against `sdpa_reference` in fp32 on
-the bf16-rounded inputs. A kernel passes when it is within `rtol = 2e-2`,
-`atol = 1e-2` of both the reference and the built-in, and its max abs error is
-no larger than PyTorch MPS SDPA's. The recorded `bytes_per_call` is the
-compulsory traffic (q, k and v read once, O written once) for every variant.
+`flash_attention_hd32.py` times three variants per framework on the same bf16
+inputs at `[1, 8, 5184, 32]`, through MLX and through PyTorch MPS:
+
+- `v1`: the frozen v1 shader in `bench/baselines/flash_attention_hd32_v1.metal`
+  (32 query rows, 64-key blocks, online-softmax correction on every block). Only
+  the benchmark compiles and launches it; the public `flash_attention_hd32`
+  still runs only the kernel in `kernels/flash_attention_hd32/`. Do not edit
+  the frozen copy to track the candidate.
+- `kernel`: the candidate, `flash_attention_hd32`.
+- `builtin`: `mx.fast.scaled_dot_product_attention` or
+  `torch.nn.functional.scaled_dot_product_attention` on MPS.
+
+For each framework, every warmup and timed iteration calls v1, the candidate
+and the built-in once each before the next iteration starts, so all three see
+the same machine state. The order is not fixed: iterations walk
+`BALANCED_SCHEDULE`, a Williams design over all six orders of the three
+variants. Over each six-iteration cycle, every variant takes every position
+twice and runs right after each other variant three times (counting from one
+iteration's last call to the next iteration's first), never after itself. A
+fixed order, or a plain cyclic rotation, would keep v1 running after the
+slower built-in more often than the candidate does. Defaults are 102 timed
+iterations plus 12 warmup (`--iterations`, `--warmup`), whole cycles, so the
+default run is exactly balanced; other counts that are not multiples of 6 print
+a note. It prints median, p10 and p90 ms per call and
+TFLOP/s (FLOPs = `4 * B * H * Lq * Lk * D`) for all six variants, plus the max
+and mean abs error of each against `sdpa_reference` in fp32 on the bf16-rounded
+inputs, and the candidate's speedup over MPS SDPA, MLX SDPA and v1.
+
+A kernel passes correctness when it is within `rtol = 2e-2`, `atol = 1e-2` of
+both the reference and the built-in, and its max abs error is no larger than
+PyTorch MPS SDPA's. Correctness alone decides the exit code. Separately, the
+speed gate passes for a framework only if, in the same run, the candidate's
+median is below v1's median and outside v1's p10 to p90 range. It is printed
+and recorded; `bench/run_mac.sh v1` times v1 against itself and is not
+expected to pass it. The recorded `bytes_per_call` is the compulsory traffic
+(q, k and v read once, O written once) for every variant.
 
 On the Mac, one command installs the `mac` extra, runs `pytest -m metal`, runs
 the benchmark with `--record --version <version>`, and prints the git SHA:
@@ -61,11 +87,17 @@ record_if_requested(
 ```
 
 `timings` maps framework names `mlx` and `mps` to `kernel` and `builtin`
-lists of synchronized per-iteration times in milliseconds, excluding warmup.
-Use only frameworks actually measured. `bytes_per_call` has the same keys,
+lists of synchronized per-iteration times in milliseconds, excluding warmup,
+and optionally a `baseline` list for a frozen earlier kernel timed in the same
+run. Use only frameworks actually measured. `bytes_per_call` has the same keys,
 with the bytes read and written per call for each variant. Median, min,
 linearly interpolated p10/p90, iterations, TFLOP/s, GB/s, and kernel speedup
 against the corresponding built-in are calculated from those measurements.
+With a baseline, the record also has the baseline's statistics, the kernel's
+`speedup_vs_baseline`, and `speed_gate`, which maps each framework to
+`record.speed_gate`: `true` only if the kernel's median is below the
+baseline's and outside the baseline's p10 to p90 range. `speed_gate` is `null`
+when no baseline was timed.
 `shape` and the optional `launch_config` are JSON-serializable dictionaries;
 the latter can capture query/key blocks, threads, and threadgroup memory
 (`threadgroup_memory_bytes` is 0 for `flash_attention_hd32`, which uses none).

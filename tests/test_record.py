@@ -74,6 +74,68 @@ def test_record_fields_and_append(tmp_path, monkeypatch, inputs):
         "speedup": 3.0,
     }
     assert first["variants"]["mlx"]["builtin"]["gb_per_s"] == pytest.approx(2 / 3)
+    assert "baseline" not in first["variants"]["mlx"]
+    assert "speedup_vs_baseline" not in kernel
+    assert first["speed_gate"] is None
+
+
+def test_record_includes_baseline_and_speed_gate(tmp_path, monkeypatch, inputs):
+    monkeypatch.setattr(record, "_git", lambda: ("abc123", False))
+    inputs["timings"]["mlx"]["baseline"] = [3, 4, 5]
+    inputs["timings"]["mps"]["baseline"] = [3, 4]
+    for framework in ("mlx", "mps"):
+        inputs["bytes_per_call"][framework]["baseline"] = 2_000_000
+    data = record.append_record("attention", directory=tmp_path, **inputs)
+    assert json.loads((tmp_path / "attention.jsonl").read_text()) == data
+    baseline = data["variants"]["mlx"]["baseline"]
+    assert baseline == {
+        "median_ms": 4.0,
+        "min_ms": 3.0,
+        "p10_ms": 3.2,
+        "p90_ms": 4.8,
+        "iterations": 3,
+        "bytes_per_call": 2_000_000,
+        "tflops": 0.5,
+        "gb_per_s": 0.5,
+    }
+    assert set(data["variants"]["mlx"]) == {"baseline", "kernel", "builtin"}
+    assert data["variants"]["mlx"]["kernel"]["speedup_vs_baseline"] == 2.0
+    # Kernel medians 2.0 (mlx) and 3.0 (mps) are below v1's p10 of 3.2 and 3.1.
+    assert data["speed_gate"] == {"mlx": True, "mps": True}
+    # 3.4 is below v1's mps median of 3.5 but inside its p10 to p90 range.
+    inputs["timings"]["mps"]["kernel"] = [3.4, 3.4]
+    data = record.append_record("attention", directory=tmp_path, **inputs)
+    assert data["speed_gate"] == {"mlx": True, "mps": False}
+    assert len((tmp_path / "attention.jsonl").read_text().splitlines()) == 2
+
+
+def test_record_rejects_mismatched_baseline(tmp_path, inputs):
+    inputs["timings"]["mlx"]["baseline"] = [3, 4, 5]
+    with pytest.raises(ValueError, match="byte counts"):
+        record.append_record("attention", directory=tmp_path, **inputs)
+    inputs["timings"]["mlx"]["other"] = [1]
+    inputs["bytes_per_call"]["mlx"]["baseline"] = 1
+    inputs["bytes_per_call"]["mlx"]["other"] = 1
+    with pytest.raises(ValueError, match="optional baseline"):
+        record.append_record("attention", directory=tmp_path, **inputs)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("kernel_median", "passed"),
+    [
+        (1.9, True),  # below v1's median and below its p10
+        (2.0, False),  # on v1's p10: inside the range
+        (2.5, False),  # below v1's median but inside p10 to p90
+        (3.0, False),  # equal to v1's median
+        (3.5, False),  # slower than v1
+        (4.1, False),  # above v1's p90
+    ],
+)
+def test_speed_gate_rule(kernel_median, passed):
+    baseline = {"median_ms": 3.0, "p10_ms": 2.0, "p90_ms": 4.0}
+    kernel = {"median_ms": kernel_median, "p10_ms": 0.0, "p90_ms": 9.0}
+    assert record.speed_gate(kernel, baseline) is passed
 
 
 def test_table_preserves_order_and_escapes_cells(tmp_path, monkeypatch, inputs):
