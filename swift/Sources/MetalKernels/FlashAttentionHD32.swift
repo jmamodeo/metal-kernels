@@ -79,8 +79,8 @@ public enum FlashAttentionHD32 {
     public static let keyBlock = 64
     /// Mirrors `FA_HD32_THREADS`: 8 query rows per simdgroup of 32 threads.
     public static let threadgroupSize = queryBlock / 8 * 32
-    /// Two buffers of one 64-key K block and one V block, staged in bf16 (fp32 inputs stage
-    /// twice this). Mirrors `FA_HD32_KV_ELEMENTS`. The shader declares the
+    /// Two buffers of one 64-key K block and one V block in bf16, or one buffer in fp32:
+    /// the same size for either dtype. Mirrors `FA_HD32_KV_BYTES`. The shader declares the
     /// stage itself, so the host does not set threadgroup memory.
     public static let threadgroupMemoryBytes = 2 * 2 * keyBlock * headDim * 2
     /// Mirrors `FA_HD32_DIM_COUNT`: length of the int32 `dims` buffer.

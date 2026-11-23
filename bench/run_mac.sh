@@ -53,6 +53,9 @@ case "$version" in
     v7)
         default_design="v6 with the K/V stage double buffered in threadgroup memory (16 KB for bf16, 32 KB for fp32): the next 64-key block's device loads are issued into registers before the current block's math and stored into the other buffer after it, one barrier per block instead of two"
         ;;
+    v7.1)
+        default_design="v7 with a single-buffer fp32 K/V stage (16 KB for both dtypes): bf16 keeps v7's double buffer and one barrier per block; fp32 issues the next block's device loads into registers before the math, then a barrier, the store into the one buffer, and a barrier"
+        ;;
     *)
         default_design=""
         ;;

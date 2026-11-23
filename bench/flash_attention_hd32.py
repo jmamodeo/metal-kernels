@@ -30,7 +30,7 @@ alone decides the exit code. Results are appended through
 Run on Apple silicon from the repository root:
 
     python bench/flash_attention_hd32.py
-    python bench/flash_attention_hd32.py --record --version v7 --design "TEXT"
+    python bench/flash_attention_hd32.py --record --version v7.1 --design "TEXT"
 """
 
 from __future__ import annotations
@@ -476,8 +476,8 @@ def main(argv: list[str] | None = None) -> int:
             "rows_per_simdgroup": 8,
             "threadgroup_memory_bytes": THREADGROUP_MEMORY_BYTES,
             "kv_load": (
-                "device to double-buffered threadgroup memory (16 KB for bf16, "
-                "32 KB for fp32), shared by 4 simdgroups"
+                "device to threadgroup memory, double buffered for bf16 and single "
+                "buffered for fp32 (16 KB for both), shared by 4 simdgroups"
             ),
             "mma_inputs": "bf16 Q, K, V; fp32 P",
             "mma_accumulator": "fp32",

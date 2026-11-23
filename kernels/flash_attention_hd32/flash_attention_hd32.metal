@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// FlashAttention for head dim 32, version 7.
+// FlashAttention for head dim 32, version 7.1.
 //
 // softmax(Q Kᵀ * scale + bias) V with an online softmax, so the score matrix
 // is never written to memory. One threadgroup of four simdgroups owns 32
@@ -7,10 +7,11 @@
 // GEMMs on 8x8 simdgroup_matrix tiles with fp32 accumulators. K and V are
 // walked in blocks of 64 keys. All 128 threads copy each block once from
 // device memory into threadgroup memory, in the input dtype, and the four
-// simdgroups read their tiles from that shared copy. The stage is double
-// buffered (16 KB for bf16): the next block's device loads are issued before
-// the current block's math and stored into the other buffer after it, so
-// there is one barrier per block. Q, K, V, bias
+// simdgroups read their tiles from that shared copy. The next block's device
+// loads are issued into registers before the current block's math and stored
+// into the stage after it. For bf16 the stage is double buffered, so there is
+// one barrier per block; for fp32 it is a single buffer, with a second
+// barrier before the store. Either way the stage is 16 KB. Q, K, V, bias
 // and O share one dtype, bf16 or fp32. Softmax and accumulation are fp32; a
 // bf16 O is rounded once at the end.
 //
@@ -36,11 +37,12 @@ constant constexpr uint FA_HD32_BLOCK_K = 64;  // keys per K/V block
 constant constexpr uint FA_HD32_D_TILES = FA_HD32_HEAD_DIM / FA_HD32_TILE;
 constant constexpr uint FA_HD32_K_TILES = FA_HD32_BLOCK_K / FA_HD32_TILE;
 constant constexpr uint FA_HD32_THREADS = FA_HD32_BLOCK_Q / FA_HD32_TILE * FA_HD32_SIMD_WIDTH;
-// Elements of one staged K or V block, of one K/V buffer (K then V), and of
-// the whole double-buffered K/V stage.
+// Elements of one staged K or V block and of one K/V buffer (K then V).
 constant constexpr uint FA_HD32_BLOCK_ELEMENTS = FA_HD32_BLOCK_K * FA_HD32_HEAD_DIM;
 constant constexpr uint FA_HD32_BUFFER_ELEMENTS = 2 * FA_HD32_BLOCK_ELEMENTS;
-constant constexpr uint FA_HD32_KV_ELEMENTS = 2 * FA_HD32_BUFFER_ELEMENTS;
+// Bytes of the whole K/V stage, for every dtype: two bf16 buffers or one
+// fp32 buffer.
+constant constexpr uint FA_HD32_KV_BYTES = 2 * FA_HD32_BUFFER_ELEMENTS * 2;
 // 4-element vectors each thread copies per K or V block.
 constant constexpr uint FA_HD32_COPY_VECTORS = FA_HD32_BLOCK_ELEMENTS / 4 / FA_HD32_THREADS;
 constant constexpr uint FA_HD32_NEG_INF_BITS = 0xFF800000u;
@@ -195,10 +197,21 @@ struct FaHd32Storage<4> {
     typedef float type;
 };
 
+// K/V stage depth per storage type: two buffers for bf16 (double buffered),
+// one for fp32, so both stages are FA_HD32_KV_BYTES. A double-buffered fp32
+// stage would be 32 KB, Apple's whole per-threadgroup limit.
+template <typename T>
+struct FaHd32Stage {
+    static constant constexpr uint buffers = sizeof(T) == 2 ? 2 : 1;
+    static constant constexpr uint elements = buffers * FA_HD32_BUFFER_ELEMENTS;
+    static_assert(elements * sizeof(T) == FA_HD32_KV_BYTES, "unexpected K/V stage size");
+};
+
 // Declares the threadgroup K/V stage NAME for a kernel whose K buffer is
 // PTR. Threadgroup variables are declared at kernel scope and passed in.
-#define FA_HD32_KV_STAGE(NAME, PTR) \
-    threadgroup FaHd32Storage<sizeof((PTR)[0])>::type NAME[FA_HD32_KV_ELEMENTS]
+#define FA_HD32_KV_STAGE(NAME, PTR)                         \
+    threadgroup FaHd32Storage<sizeof((PTR)[0])>::type NAME \
+        [FaHd32Stage<FaHd32Storage<sizeof((PTR)[0])>::type>::elements]
 
 // Per-storage-type load helpers and the element type fed to the GEMMs. bf16
 // tiles are simdgroup_bfloat8x8 when the compiler has `bfloat` (Metal 3.1);
@@ -309,23 +322,26 @@ inline void fa_hd32_store_block(
 // threadgroup per (batch * head, query block): batch * heads *
 // ceil(query_length / FA_HD32_BLOCK_Q) threadgroups. `group` is the
 // threadgroup index and `thread_index` the thread index inside it. `kv` is
-// the threadgroup's FA_HD32_KV_ELEMENTS-element stage: two buffers of
-// FA_HD32_BUFFER_ELEMENTS, each K at [0, FA_HD32_BLOCK_ELEMENTS) and V after
-// it. Every thread of the threadgroup must call this function, because the
-// K/V copy uses barriers.
+// the threadgroup's FaHd32Stage<T>::elements-element stage: N =
+// FaHd32Stage<T>::buffers buffers of FA_HD32_BUFFER_ELEMENTS (two for bf16,
+// one for fp32), each K at [0, FA_HD32_BLOCK_ELEMENTS) and V after it. Every
+// thread of the threadgroup must call this function, because the K/V copy
+// uses barriers.
 //
 // Simdgroup s owns query rows [8 s, 8 s + 8) of the block. Q and the fp32 O
 // accumulator stay in registers as four 8x8 tiles each. Keys are walked in
-// blocks of FA_HD32_BLOCK_K; block b lives in buffer b % 2 (zero past the
+// blocks of FA_HD32_BLOCK_K; block b lives in buffer b % N (zero past the
 // last key). The whole threadgroup copies block 0 into buffer 0 before the
 // loop, then a barrier. In iteration b each thread first issues its device
 // loads of block b + 1 into registers, then each lane reads its K and V tile
-// elements of block b from buffer b % 2 and the simdgroup computes
+// elements of block b from buffer b % N and the simdgroup computes
 // S = Q Kᵀ, updates the online softmax and accumulates O += P V; then the
-// thread stores block b + 1 into buffer (b + 1) % 2 and the threadgroup
-// meets at one barrier. That barrier both publishes block b + 1 and keeps
-// iteration b + 1's store into buffer b % 2 from overwriting block b while
-// another simdgroup still reads it. A simdgroup whose rows are all past
+// thread stores block b + 1 into buffer (b + 1) % N and the threadgroup
+// meets at a barrier. With two buffers that one barrier both publishes block
+// b + 1 and keeps iteration b + 1's store into buffer b % 2 from overwriting
+// block b while another simdgroup still reads it. With one buffer the store
+// overwrites block b itself, so a second barrier before it waits for every
+// simdgroup to finish reading. A simdgroup whose rows are all past
 // query_length still copies and waits at the barriers, but skips the math.
 //
 // The head dimension is split as d = 4 i + t across the four tiles t, with
@@ -352,6 +368,7 @@ inline void flash_attention_hd32_block(
     typedef FaHd32Io<T> Io;
     typedef typename Io::mma_type M;
     typedef typename Io::vec4 V4;
+    typedef FaHd32Stage<T> Stage;
 
     const uint query_blocks = (params.query_length + FA_HD32_BLOCK_Q - 1) / FA_HD32_BLOCK_Q;
     const uint batch_head = group / query_blocks;
@@ -514,7 +531,12 @@ inline void flash_attention_hd32_block(
             }
         }
         if (has_next) {
-            stage ^= 1u;
+            if (Stage::buffers == 1) {
+                // The store overwrites block b: wait until every simdgroup
+                // has read it.
+                threadgroup_barrier(mem_flags::mem_threadgroup);
+            }
+            stage = (stage + 1) % Stage::buffers;
             fa_hd32_store_block(kv + stage * FA_HD32_BUFFER_ELEMENTS, next, thread_index);
             threadgroup_barrier(mem_flags::mem_threadgroup);
         }
@@ -550,7 +572,7 @@ kernel void flash_attention_hd32(
     const device float* scale [[buffer(6)]],
     uint group [[threadgroup_position_in_grid]],
     uint thread_index [[thread_index_in_threadgroup]]) {
-    threadgroup T kv[FA_HD32_KV_ELEMENTS];
+    threadgroup T kv[FaHd32Stage<T>::elements];
     flash_attention_hd32_block(
         q, k, v, bias, out, kv, fa_hd32_params(dims, scale[0]), group, thread_index);
 }

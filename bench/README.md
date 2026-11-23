@@ -59,12 +59,13 @@ On the Mac, one command installs the `mac` extra, runs `pytest -m metal`, runs
 the benchmark with `--record --version <version>`, and prints the git SHA:
 
 ```bash
-bench/run_mac.sh v7
+bench/run_mac.sh v7.1
 ```
 
-It uses `./.venv` when present. v7 is the current kernel, timed against the
-frozen v6; a later candidate is kept only if its paired median-ratio bootstrap 95% CI against the frozen baseline lies entirely below 1 on both MLX and MPS and its max abs error is no worse than MPS SDPA's; otherwise it is recorded as a negative result. `v0`, `v1`, `v6` and
-`v7` have a default design text; other versions pass theirs as a second argument:
+It uses `./.venv` when present. v7.1 is the current kernel, timed against the
+frozen v6. It differs from v7 only for fp32, which this bf16 benchmark does not
+time; `bench/run_mac.sh swift` times both dtypes; a later candidate is kept only if its paired median-ratio bootstrap 95% CI against the frozen baseline lies entirely below 1 on both MLX and MPS and its max abs error is no worse than MPS SDPA's; otherwise it is recorded as a negative result. `v0`, `v1`, `v6`,
+`v7` and `v7.1` have a default design text; other versions pass theirs as a second argument:
 `bench/run_mac.sh v3 "TEXT"`. The script appends to
 `bench/results/flash_attention_hd32.jsonl` and commits nothing.
 

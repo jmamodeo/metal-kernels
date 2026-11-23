@@ -6,12 +6,13 @@
 MLX and PyTorch are imported only by the backend that runs, so importing this
 module needs neither.
 
-Version 7 is the current kernel: the tiled ``simdgroup_matrix`` kernel
+Version 7.1 is the current kernel: the tiled ``simdgroup_matrix`` kernel
 from the design note, one threadgroup of four simdgroups per 32 query
 rows of one (batch, head), with each 64-key K/V block copied once into
 threadgroup memory, in the input dtype, and shared by the four simdgroups.
-The stage is double buffered: the next block's device loads are issued
-before the current block's math, with one barrier per block.
+The next block's device loads are issued before the current block's math.
+For bf16 the stage is double buffered, with one barrier per block; for
+fp32 it is a single buffer, with two barriers per block.
 """
 
 from __future__ import annotations
@@ -29,8 +30,8 @@ HEAD_DIM = 32
 QUERY_BLOCK = 32
 KEY_BLOCK = 64
 THREADGROUP_SIZE = QUERY_BLOCK // 8 * 32
-# Two buffers of one 64-key K block and one V block, staged in bf16 (fp32
-# inputs stage twice this). Mirrors FA_HD32_KV_ELEMENTS in the shader.
+# Two buffers of one 64-key K block and one V block in bf16, or one buffer
+# in fp32: 16 KB for either dtype. Mirrors FA_HD32_KV_BYTES in the shader.
 THREADGROUP_MEMORY_BYTES = 2 * 2 * KEY_BLOCK * HEAD_DIM * 2
 BACKENDS = ("mlx", "mps")
 
