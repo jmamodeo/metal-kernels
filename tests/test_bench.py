@@ -106,3 +106,69 @@ def test_flash_attention_bench_record_arguments(capsys):
     with pytest.raises(SystemExit):
         bench.parse_args(["--iterations", "0"])
     assert "--record requires --version and --design" in capsys.readouterr().err
+
+
+def test_flash_attention_bench_defaults_to_100_iterations_plus_warmup():
+    bench = _load_flash_attention_bench()
+    args = bench.parse_args([])
+    assert args.iterations >= 100 and args.warmup >= 1
+    assert (args.iterations, args.warmup) == (bench.DEFAULT_ITERATIONS, bench.DEFAULT_WARMUP)
+    args = bench.parse_args(["--iterations", "7", "--warmup", "0"])
+    assert (args.iterations, args.warmup) == (7, 0)
+
+
+def test_flash_attention_bench_interleaves_variants():
+    bench = _load_flash_attention_bench()
+    log = []
+
+    def make(name):
+        def call():
+            log.append(name)
+            return name
+
+        return call
+
+    calls = {name: make(name) for name in bench.VARIANTS}
+    syncs = []
+    samples, outputs = bench.time_interleaved(calls, syncs.append, warmup=2, iterations=3)
+    assert bench.VARIANTS == ("baseline", "kernel", "builtin")
+    assert log == list(bench.VARIANTS) * 5
+    assert {name: len(values) for name, values in samples.items()} == dict.fromkeys(calls, 3)
+    assert outputs == {name: name for name in calls}
+    # Every timed call is synchronized before it starts and after it returns.
+    assert syncs[6:] == [value for name in bench.VARIANTS * 3 for value in (None, name)]
+
+
+def test_flash_attention_bench_frozen_v1_baseline():
+    bench = _load_flash_attention_bench()
+    source = bench.BASELINE_SOURCE.read_text()
+    assert bench.BASELINE_SOURCE == _REPO / "bench" / "baselines" / "flash_attention_hd32_v1.metal"
+    assert source.startswith("// SPDX-License-Identifier: Apache-2.0\n")
+    assert "constant constexpr uint FA_HD32_BLOCK_Q = 32;" in source
+    assert "constant constexpr uint FA_HD32_BLOCK_K = 64;" in source
+    assert "inline void flash_attention_hd32_block(" in source
+    assert "FA_HD32_INSTANTIATE(bfloat, ushort)" in source
+    assert "threadgroup float" not in source and "threadgroup_barrier" not in source
+    # v1 rescales O and the running sum on every block, unconditionally.
+    assert "o_tiles[t].thread_elements() *= correction;" in source
+    assert "running_sum = running_sum * correction + fa_hd32_row_sum(block_sum);" in source
+    dims, threads, threadgroup = bench.v1_launch((1, 8, 5184, 32), (1, 8, 5184, 32))
+    assert dims == [41472, 8, 5184, 5184, 0, 0, 0, 0, 0]
+    assert (threads, threadgroup) == (8 * 162 * 128, 128)
+    dims, threads, threadgroup = bench.v1_launch((1, 8, 201, 32), (1, 8, 5184, 32))
+    assert dims[:4] == [1608, 8, 201, 5184]
+    assert (threads, threadgroup) == (8 * 7 * 128, 128)
+
+
+def test_public_kernel_has_one_source_and_no_version_argument(monkeypatch):
+    import inspect
+
+    from metal_kernels.flash_attention import flash_attention_hd32
+    from metal_kernels.loader import kernel_dir
+
+    monkeypatch.delenv("METAL_KERNELS_ROOT", raising=False)
+    assert [path.name for path in kernel_dir("flash_attention_hd32").glob("*.metal")] == [
+        "flash_attention_hd32.metal"
+    ]
+    parameters = list(inspect.signature(flash_attention_hd32).parameters)
+    assert parameters == ["q", "k", "v", "bias", "scale", "backend"]

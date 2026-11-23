@@ -2,17 +2,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """Time FlashAttention hd32 against built-in SDPA at the SAM 3 encoder shape.
 
-Four variants run on the same bf16 inputs at ``[1, 8, 5184, 32]``:
+Six variants run on the same bf16 inputs at ``[1, 8, 5184, 32]``:
 
-- ``mlx kernel``: ``flash_attention_hd32(..., backend="mlx")``
+- ``mlx v1`` and ``mps v1``: the frozen v1 shader in
+  ``bench/baselines/flash_attention_hd32_v1.metal``, launched only from here
+- ``mlx kernel``: ``flash_attention_hd32(..., backend="mlx")``, the candidate
 - ``mlx builtin``: ``mx.fast.scaled_dot_product_attention``
-- ``mps kernel``: ``flash_attention_hd32(..., backend="mps")``
+- ``mps kernel``: ``flash_attention_hd32(..., backend="mps")``, the candidate
 - ``mps builtin``: ``torch.nn.functional.scaled_dot_product_attention`` on MPS
 
-Each prints median, p10 and p90 ms per call and TFLOP/s, with
+For each framework, every warmup and timed iteration calls v1, the candidate
+and the built-in in turn, so all three see the same machine state. Each
+prints median, p10 and p90 ms per call and TFLOP/s, with
 FLOPs = ``4 * B * H * Lq * Lk * D``. Errors are measured against
 ``reference.sdpa.sdpa_reference`` in fp32 on the bf16-rounded inputs.
-Results are appended through ``bench/record.py`` only with ``--record``.
+
+The speed gate passes for a framework when the candidate's median is below
+v1's and outside v1's p10 to p90 range in the same run. It is printed and
+recorded; correctness alone decides the exit code. Results are appended
+through ``bench/record.py`` only with ``--record``.
 
 Run on Apple silicon from the repository root:
 
@@ -35,9 +43,11 @@ for _path in (_REPO / "python" / "src", _REPO):
         sys.path.insert(0, str(_path))
 
 from bench.record import (  # noqa: E402
+    BASELINE,
     add_record_arguments,
     percentile,
     record_if_requested,
+    speed_gate,
     validate_record_arguments,
 )
 
@@ -47,7 +57,29 @@ DTYPE = "bfloat16"
 RTOL = 2e-2
 ATOL = 1e-2
 FRAMEWORKS = ("mlx", "mps")
-VARIANTS = ("kernel", "builtin")
+# Interleaving order inside each iteration.
+VARIANTS = (BASELINE, "kernel", "builtin")
+LABELS = {BASELINE: "v1", "kernel": "kernel", "builtin": "builtin"}
+DEFAULT_WARMUP = 10
+DEFAULT_ITERATIONS = 100
+
+# Frozen v1 baseline: its own source and launch geometry, independent of the
+# candidate in kernels/flash_attention_hd32/.
+BASELINE_SOURCE = _REPO / "bench" / "baselines" / "flash_attention_hd32_v1.metal"
+V1_QUERY_BLOCK = 32
+V1_KEY_BLOCK = 64
+V1_THREADGROUP_SIZE = 128
+_V1_MLX_BODY = """
+    flash_attention_hd32_block(
+        fa_hd32_bits(q),
+        fa_hd32_bits(k),
+        fa_hd32_bits(v),
+        fa_hd32_bits(bias),
+        fa_hd32_bits(out),
+        fa_hd32_params(dims, scale[0]),
+        threadgroup_position_in_grid.x,
+        thread_index_in_threadgroup);
+"""
 
 
 def flops_per_call(
@@ -76,6 +108,20 @@ def summarize(samples: list[float], flops: int) -> dict:
     }
 
 
+def v1_launch(q_shape, kv_shape) -> tuple[list[int], int, int]:
+    """``(dims, threads, threadgroup)`` for the frozen v1 shader, no bias.
+
+    ``dims`` follows the shader's ``FaHd32Dim`` layout. One threadgroup of
+    ``V1_THREADGROUP_SIZE`` threads per ``V1_QUERY_BLOCK`` query rows of each
+    (batch, head).
+    """
+    batch, heads, query_length, _ = q_shape
+    key_length = kv_shape[2]
+    dims = [batch * heads * query_length, heads, query_length, key_length, 0, 0, 0, 0, 0]
+    groups = batch * heads * -(-query_length // V1_QUERY_BLOCK)
+    return dims, groups * V1_THREADGROUP_SIZE, V1_THREADGROUP_SIZE
+
+
 def abs_errors(actual, expected) -> dict:
     import numpy as np
 
@@ -85,8 +131,12 @@ def abs_errors(actual, expected) -> dict:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--warmup", type=int, default=3, help="untimed calls per variant")
-    parser.add_argument("--iterations", type=int, default=20, help="timed calls per variant")
+    parser.add_argument(
+        "--warmup", type=int, default=DEFAULT_WARMUP, help="untimed calls per variant"
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=DEFAULT_ITERATIONS, help="timed calls per variant"
+    )
     parser.add_argument("--seed", type=int, default=0, help="input random seed")
     add_record_arguments(parser)
     return parser
@@ -115,19 +165,89 @@ def _reference(q, k, v):
     return out
 
 
-def _time(call, synchronize, warmup: int, iterations: int) -> tuple[list[float], object]:
-    out = None
+def time_interleaved(calls: dict, synchronize, warmup: int, iterations: int) -> tuple[dict, dict]:
+    """Time ``calls`` round-robin and return ``(samples_ms, last_outputs)``.
+
+    Each warmup and timed iteration runs every call once, in ``calls`` order,
+    before the next iteration starts. Each timed call is synchronized before
+    and after, so samples are per-call GPU wall time.
+    """
+    outputs = dict.fromkeys(calls)
+    samples = {name: [] for name in calls}
     for _ in range(warmup):
-        out = call()
-        synchronize(out)
-    samples = []
+        for name, call in calls.items():
+            outputs[name] = call()
+            synchronize(outputs[name])
     for _ in range(iterations):
-        synchronize(None)
-        start = time.perf_counter()
-        out = call()
-        synchronize(out)
-        samples.append((time.perf_counter() - start) * 1e3)
-    return samples, out
+        for name, call in calls.items():
+            synchronize(None)
+            start = time.perf_counter()
+            outputs[name] = call()
+            synchronize(outputs[name])
+            samples[name].append((time.perf_counter() - start) * 1e3)
+    return samples, outputs
+
+
+def _v1_mlx_call(inputs, q_shape, kv_shape, scale):
+    import mlx.core as mx
+
+    kernel = mx.fast.metal_kernel(
+        name="flash_attention_hd32_v1_baseline",
+        input_names=["q", "k", "v", "bias", "dims", "scale"],
+        output_names=["out"],
+        source=_V1_MLX_BODY,
+        header=BASELINE_SOURCE.read_text(encoding="utf-8"),
+        ensure_row_contiguous=True,
+    )
+    dims, threads, threadgroup = v1_launch(q_shape, kv_shape)
+    constants = (
+        mx.array(dims, dtype=mx.int32),
+        mx.array([scale], dtype=mx.float32),
+        mx.zeros((1,), dtype=inputs[0].dtype),
+    )
+    mx.eval(*constants)
+    dims_array, scale_array, placeholder = constants
+
+    def call():
+        (out,) = kernel(
+            inputs=[*inputs, placeholder, dims_array, scale_array],
+            output_shapes=[inputs[0].shape],
+            output_dtypes=[inputs[0].dtype],
+            grid=(threads, 1, 1),
+            threadgroup=(threadgroup, 1, 1),
+        )
+        return out
+
+    return call
+
+
+def _v1_mps_call(inputs, q_shape, kv_shape, scale):
+    import torch
+
+    library = torch.mps.compile_shader(BASELINE_SOURCE.read_text(encoding="utf-8"))
+    dims, threads, threadgroup = v1_launch(q_shape, kv_shape)
+    q, k, v = inputs
+    device = q.device
+    dims_tensor = torch.tensor(dims, dtype=torch.int32, device=device)
+    scale_tensor = torch.tensor([scale], dtype=torch.float32, device=device)
+    placeholder = torch.zeros(1, dtype=q.dtype, device=device)
+
+    def call():
+        out = torch.empty(q.shape, dtype=q.dtype, device=device)
+        library.flash_attention_hd32_bfloat(
+            q,
+            k,
+            v,
+            placeholder,
+            out,
+            dims_tensor,
+            scale_tensor,
+            threads=threads,
+            group_size=threadgroup,
+        )
+        return out
+
+    return call
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -178,10 +298,12 @@ def main(argv: list[str] | None = None) -> int:
 
     calls = {
         "mlx": {
+            BASELINE: _v1_mlx_call(mlx_inputs, q_shape, kv_shape, scale),
             "kernel": lambda: flash_attention_hd32(*mlx_inputs, backend="mlx"),
             "builtin": lambda: mx.fast.scaled_dot_product_attention(*mlx_inputs, scale=scale),
         },
         "mps": {
+            BASELINE: _v1_mps_call(torch_inputs, q_shape, kv_shape, scale),
             "kernel": lambda: flash_attention_hd32(*torch_inputs, backend="mps"),
             "builtin": lambda: functional.scaled_dot_product_attention(*torch_inputs),
         },
@@ -195,14 +317,10 @@ def main(argv: list[str] | None = None) -> int:
     timings: dict = {}
     outputs: dict = {}
     for framework in FRAMEWORKS:
-        timings[framework] = {}
-        outputs[framework] = {}
-        for variant in VARIANTS:
-            samples, out = _time(
-                calls[framework][variant], sync[framework], args.warmup, args.iterations
-            )
-            timings[framework][variant] = samples
-            outputs[framework][variant] = to_numpy[framework](out)
+        ordered = {variant: calls[framework][variant] for variant in VARIANTS}
+        samples, last = time_interleaved(ordered, sync[framework], args.warmup, args.iterations)
+        timings[framework] = samples
+        outputs[framework] = {variant: to_numpy[framework](last[variant]) for variant in VARIANTS}
 
     reference_errors = {
         (framework, variant): abs_errors(outputs[framework][variant], expected)
@@ -237,13 +355,18 @@ def main(argv: list[str] | None = None) -> int:
         f"{'variant':<12} {'median ms':>10} {'p10 ms':>10} {'p90 ms':>10} {'TFLOP/s':>8} "
         f"{'max abs err':>12} {'mean abs err':>13}"
     )
+    stats = {
+        (framework, variant): summarize(timings[framework][variant], flops)
+        for framework in FRAMEWORKS
+        for variant in VARIANTS
+    }
     for framework in FRAMEWORKS:
         for variant in VARIANTS:
-            stats = summarize(timings[framework][variant], flops)
+            row = stats[(framework, variant)]
             errors = reference_errors[(framework, variant)]
             print(
-                f"{framework + ' ' + variant:<12} {stats['median_ms']:>10.3f} "
-                f"{stats['p10_ms']:>10.3f} {stats['p90_ms']:>10.3f} {stats['tflops']:>8.3f} "
+                f"{framework + ' ' + LABELS[variant]:<12} {row['median_ms']:>10.3f} "
+                f"{row['p10_ms']:>10.3f} {row['p90_ms']:>10.3f} {row['tflops']:>8.3f} "
                 f"{errors['max_abs_error']:>12.3e} {errors['mean_abs_error']:>13.3e}"
             )
     print("Errors are against sdpa_reference (fp32) on the bf16-rounded inputs.")
@@ -254,6 +377,20 @@ def main(argv: list[str] | None = None) -> int:
             f"(rtol={RTOL}, atol={ATOL} vs reference and built-in; "
             f"max abs error <= MPS SDPA's {mps_sdpa_max:.3e}); "
             f"vs built-in max {check['builtin']['max_abs_error']:.3e}"
+        )
+    mlx_sdpa = stats[("mlx", "builtin")]["median_ms"]
+    mps_sdpa = stats[("mps", "builtin")]["median_ms"]
+    for framework in FRAMEWORKS:
+        kernel = stats[(framework, "kernel")]
+        baseline = stats[(framework, BASELINE)]
+        gate = speed_gate(kernel, baseline)
+        print(
+            f"{framework} kernel speed gate: {'passed' if gate else 'not passed'} "
+            f"(median {kernel['median_ms']:.3f} ms vs v1 median {baseline['median_ms']:.3f} ms, "
+            f"v1 p10-p90 {baseline['p10_ms']:.3f}-{baseline['p90_ms']:.3f} ms); "
+            f"speedup {mps_sdpa / kernel['median_ms']:.2f}x vs MPS SDPA, "
+            f"{mlx_sdpa / kernel['median_ms']:.2f}x vs MLX SDPA, "
+            f"{baseline['median_ms'] / kernel['median_ms']:.2f}x vs v1"
         )
 
     _, threads, threadgroup = launch_geometry(q_shape, kv_shape, kv_shape)
@@ -278,6 +415,13 @@ def main(argv: list[str] | None = None) -> int:
             "kv_load": "device to registers",
             "mma_inputs": "bf16 Q, K, V; fp32 P",
             "mma_accumulator": "fp32",
+            "baseline": {
+                "version": "v1",
+                "source": BASELINE_SOURCE.relative_to(_REPO).as_posix(),
+                "query_block": V1_QUERY_BLOCK,
+                "key_block": V1_KEY_BLOCK,
+                "threadgroup": V1_THREADGROUP_SIZE,
+            },
         },
     )
     if record is not None:

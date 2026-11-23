@@ -6,9 +6,12 @@
 #
 # Installs the Mac extra, runs the metal tests, then runs
 # bench/flash_attention_hd32.py with --record. The record goes to
-# bench/results/flash_attention_hd32.jsonl through bench/record.py. Prints the
-# max and mean abs error against sdpa_reference and ms/call for all four
-# variants, and the git SHA. Nothing is committed.
+# bench/results/flash_attention_hd32.jsonl through bench/record.py. The
+# benchmark interleaves the frozen v1 baseline, the candidate and the built-in
+# on every iteration (100 timed plus 10 warmup by default) and prints the max
+# and mean abs error against sdpa_reference, median/p10/p90 ms per call for
+# all six variants, the speed gate against v1, and the git SHA. Nothing is
+# committed.
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 || -z "$1" ]]; then

@@ -17,6 +17,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 RESULTS = REPO / "bench" / "results"
+# Timing variants per framework. ``baseline`` (a frozen earlier kernel timed in
+# the same run) is optional; ``kernel`` and ``builtin`` are required.
+REQUIRED_VARIANTS = ("kernel", "builtin")
+BASELINE = "baseline"
 
 
 def results_path(kernel: str, suffix: str, directory: Path = RESULTS) -> Path:
@@ -73,6 +77,18 @@ def percentile(sorted_values: list[float], fraction: float) -> float:
     return sorted_values[low] + (sorted_values[high] - sorted_values[low]) * (position - low)
 
 
+def speed_gate(kernel: dict, baseline: dict) -> bool:
+    """Whether a candidate is measurably faster than the baseline in one run.
+
+    ``kernel`` and ``baseline`` carry ``median_ms``, ``p10_ms`` and ``p90_ms``.
+    The candidate passes only if its median is below the baseline's median
+    and outside the baseline's p10 to p90 range.
+    """
+    median = kernel["median_ms"]
+    inside = baseline["p10_ms"] <= median <= baseline["p90_ms"]
+    return median < baseline["median_ms"] and not inside
+
+
 def _timing(samples, flops: int, bytes_per_call: int) -> dict:
     if not math.isfinite(bytes_per_call) or bytes_per_call <= 0:
         raise ValueError("bytes per call must be positive and finite")
@@ -108,8 +124,13 @@ def append_record(
 ) -> dict:
     """Append a run; timings and correctness are keyed by framework.
 
-    Each timings entry has ``kernel`` and ``builtin`` millisecond samples.
-    ``bytes_per_call`` has the same framework and variant keys as timings.
+    Each timings entry has ``kernel`` and ``builtin`` millisecond samples,
+    and optionally ``baseline`` samples from a frozen earlier kernel timed in
+    the same run. ``bytes_per_call`` has the same framework and variant keys
+    as timings. With a baseline, the framework's kernel entry gains
+    ``speedup_vs_baseline``, and the record's ``speed_gate`` maps the
+    framework to the :func:`speed_gate` result. ``speed_gate`` is ``None``
+    when no framework has a baseline.
     Correctness entries contain ``reference`` and ``builtin`` error dicts
     (``max_abs_error``, ``mean_abs_error``), ``rtol``, ``atol``, and ``passed``.
     The caller computes correctness on the same inputs used by both implementations.
@@ -123,11 +144,15 @@ def append_record(
         raise ValueError("timings, byte counts and correctness must cover the same frameworks")
     variants = {}
     checks = {}
+    gates = {}
+    required = set(REQUIRED_VARIANTS)
     for framework, samples in timings.items():
-        if set(samples) != {"kernel", "builtin"}:
-            raise ValueError("each framework needs kernel and builtin timings")
-        if set(bytes_per_call[framework]) != {"kernel", "builtin"}:
-            raise ValueError("each framework needs kernel and builtin byte counts")
+        if set(samples) not in (required, required | {BASELINE}):
+            raise ValueError(
+                "each framework needs kernel and builtin timings, plus optional baseline"
+            )
+        if set(bytes_per_call[framework]) != set(samples):
+            raise ValueError("each framework needs byte counts for the same variants as timings")
         check = correctness[framework]
         if set(check) != {"reference", "builtin", "rtol", "atol", "passed"}:
             raise ValueError("correctness must include reference, builtin, tolerances and passed")
@@ -152,12 +177,18 @@ def append_record(
             raise ValueError("tolerances must be nonnegative and finite")
         checks[framework] = normalized
         variants[framework] = {
-            name: _timing(samples[name], flops, bytes_per_call[framework][name])
-            for name in ("kernel", "builtin")
+            name: _timing(samples[name], flops, bytes_per_call[framework][name]) for name in samples
         }
-        variants[framework]["kernel"]["speedup"] = (
-            variants[framework]["builtin"]["median_ms"] / variants[framework]["kernel"]["median_ms"]
+        kernel_timing = variants[framework]["kernel"]
+        kernel_timing["speedup"] = (
+            variants[framework]["builtin"]["median_ms"] / kernel_timing["median_ms"]
         )
+        if BASELINE in samples:
+            baseline_timing = variants[framework][BASELINE]
+            kernel_timing["speedup_vs_baseline"] = (
+                baseline_timing["median_ms"] / kernel_timing["median_ms"]
+            )
+            gates[framework] = speed_gate(kernel_timing, baseline_timing)
     commit, dirty = _git()
     record = {
         "recorded_at": datetime.now(timezone.utc).isoformat(),
@@ -171,6 +202,7 @@ def append_record(
         "flops_per_call": flops,
         "variants": variants,
         "correctness": checks,
+        "speed_gate": gates or None,
         "launch_config": launch_config,
     }
     line = json.dumps(record, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
