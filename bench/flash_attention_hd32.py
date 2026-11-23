@@ -4,14 +4,14 @@
 
 Six variants run on the same bf16 inputs at ``[1, 8, 5184, 32]``:
 
-- ``mlx v1`` and ``mps v1``: the frozen v1 shader in
-  ``bench/baselines/flash_attention_hd32_v1.metal``, launched only from here
+- ``mlx v6`` and ``mps v6``: the frozen v6 shader in
+  ``bench/baselines/flash_attention_hd32_v6.metal``, launched only from here
 - ``mlx kernel``: ``flash_attention_hd32(..., backend="mlx")``, the candidate
 - ``mlx builtin``: ``mx.fast.scaled_dot_product_attention``
 - ``mps kernel``: ``flash_attention_hd32(..., backend="mps")``, the candidate
 - ``mps builtin``: ``torch.nn.functional.scaled_dot_product_attention`` on MPS
 
-For each framework, every warmup and timed iteration calls v1, the candidate
+For each framework, every warmup and timed iteration calls v6, the candidate
 and the built-in once each, in an order taken from ``BALANCED_SCHEDULE`` (a
 Williams design: every variant takes every position, and follows each other
 variant, equally often over one six-iteration cycle). Each prints median,
@@ -20,7 +20,7 @@ min, p10 and p90 ms per call and TFLOP/s, with FLOPs =
 ``reference.sdpa.sdpa_reference`` in fp32 on the bf16-rounded inputs.
 
 Samples from the same iteration are paired. The speed gate passes for a
-framework when the bootstrap 95% CI of the median ``candidate / v1`` ratio lies
+framework when the bootstrap 95% CI of the median ``candidate / v6`` ratio lies
 entirely below 1 (``record.median_ratio_ci``: 10,000 resamples, fixed seed).
 The same paired CI of the MPS candidate over MPS SDPA is reported as the M3
 target check but does not gate. Both are printed and recorded; correctness
@@ -30,7 +30,7 @@ alone decides the exit code. Results are appended through
 Run on Apple silicon from the repository root:
 
     python bench/flash_attention_hd32.py
-    python bench/flash_attention_hd32.py --record --version v1 --design "TEXT"
+    python bench/flash_attention_hd32.py --record --version v7 --design "TEXT"
 """
 
 from __future__ import annotations
@@ -64,12 +64,13 @@ RTOL = 2e-2
 ATOL = 1e-2
 FRAMEWORKS = ("mlx", "mps")
 VARIANTS = (BASELINE, "kernel", "builtin")
-LABELS = {BASELINE: "v1", "kernel": "kernel", "builtin": "builtin"}
+BASELINE_VERSION = "v6"
+LABELS = {BASELINE: BASELINE_VERSION, "kernel": "kernel", "builtin": "builtin"}
 # Williams design for three variants: all six orders, sequenced so that over
 # one cycle each variant takes each position twice and, counting the step from
 # one iteration's last call to the next iteration's first, is preceded by each
 # other variant three times and never by itself. A plain cyclic rotation
-# balances positions but would always run the v1 baseline right after the
+# balances positions but would always run the v6 baseline right after the
 # built-in. Iteration i uses BALANCED_SCHEDULE[i % 6], as indices into
 # VARIANTS.
 BALANCED_SCHEDULE = ((0, 1, 2), (0, 2, 1), (2, 1, 0), (1, 0, 2), (1, 2, 0), (2, 0, 1))
@@ -78,19 +79,24 @@ SCHEDULE_CYCLE = len(BALANCED_SCHEDULE)
 DEFAULT_WARMUP = 2 * SCHEDULE_CYCLE
 DEFAULT_ITERATIONS = 17 * SCHEDULE_CYCLE
 
-# Frozen v1 baseline: its own source and launch geometry, independent of the
-# candidate in kernels/flash_attention_hd32/.
-BASELINE_SOURCE = _REPO / "bench" / "baselines" / "flash_attention_hd32_v1.metal"
-V1_QUERY_BLOCK = 32
-V1_KEY_BLOCK = 64
-V1_THREADGROUP_SIZE = 128
-_V1_MLX_BODY = """
+# Frozen v6 baseline, a byte-for-byte copy of the kernel merged in b2e6847:
+# its own source and launch geometry, independent of the candidate in
+# kernels/flash_attention_hd32/. Its K/V stage is one K and one V block, 8 KB
+# for bf16 (16 KB for fp32).
+BASELINE_SOURCE = _REPO / "bench" / "baselines" / "flash_attention_hd32_v6.metal"
+BASELINE_QUERY_BLOCK = 32
+BASELINE_KEY_BLOCK = 64
+BASELINE_THREADGROUP_SIZE = 128
+BASELINE_THREADGROUP_MEMORY_BYTES = 2 * BASELINE_KEY_BLOCK * 32 * 2
+_BASELINE_MLX_BODY = """
+    FA_HD32_KV_STAGE(kv, fa_hd32_bits(k));
     flash_attention_hd32_block(
         fa_hd32_bits(q),
         fa_hd32_bits(k),
         fa_hd32_bits(v),
         fa_hd32_bits(bias),
         fa_hd32_bits(out),
+        kv,
         fa_hd32_params(dims, scale[0]),
         threadgroup_position_in_grid.x,
         thread_index_in_threadgroup);
@@ -132,18 +138,18 @@ def format_ratio(ratio: dict) -> str:
     )
 
 
-def v1_launch(q_shape, kv_shape) -> tuple[list[int], int, int]:
-    """``(dims, threads, threadgroup)`` for the frozen v1 shader, no bias.
+def baseline_launch(q_shape, kv_shape) -> tuple[list[int], int, int]:
+    """``(dims, threads, threadgroup)`` for the frozen v6 shader, no bias.
 
     ``dims`` follows the shader's ``FaHd32Dim`` layout. One threadgroup of
-    ``V1_THREADGROUP_SIZE`` threads per ``V1_QUERY_BLOCK`` query rows of each
-    (batch, head).
+    ``BASELINE_THREADGROUP_SIZE`` threads per ``BASELINE_QUERY_BLOCK`` query
+    rows of each (batch, head).
     """
     batch, heads, query_length, _ = q_shape
     key_length = kv_shape[2]
     dims = [batch * heads * query_length, heads, query_length, key_length, 0, 0, 0, 0, 0]
-    groups = batch * heads * -(-query_length // V1_QUERY_BLOCK)
-    return dims, groups * V1_THREADGROUP_SIZE, V1_THREADGROUP_SIZE
+    groups = batch * heads * -(-query_length // BASELINE_QUERY_BLOCK)
+    return dims, groups * BASELINE_THREADGROUP_SIZE, BASELINE_THREADGROUP_SIZE
 
 
 def abs_errors(actual, expected) -> dict:
@@ -238,18 +244,18 @@ def time_interleaved(calls: dict, synchronize, warmup: int, iterations: int) -> 
     return samples, outputs
 
 
-def _v1_mlx_call(inputs, q_shape, kv_shape, scale):
+def _baseline_mlx_call(inputs, q_shape, kv_shape, scale):
     import mlx.core as mx
 
     kernel = mx.fast.metal_kernel(
-        name="flash_attention_hd32_v1_baseline",
+        name=f"flash_attention_hd32_{BASELINE_VERSION}_baseline",
         input_names=["q", "k", "v", "bias", "dims", "scale"],
         output_names=["out"],
-        source=_V1_MLX_BODY,
+        source=_BASELINE_MLX_BODY,
         header=BASELINE_SOURCE.read_text(encoding="utf-8"),
         ensure_row_contiguous=True,
     )
-    dims, threads, threadgroup = v1_launch(q_shape, kv_shape)
+    dims, threads, threadgroup = baseline_launch(q_shape, kv_shape)
     constants = (
         mx.array(dims, dtype=mx.int32),
         mx.array([scale], dtype=mx.float32),
@@ -271,11 +277,11 @@ def _v1_mlx_call(inputs, q_shape, kv_shape, scale):
     return call
 
 
-def _v1_mps_call(inputs, q_shape, kv_shape, scale):
+def _baseline_mps_call(inputs, q_shape, kv_shape, scale):
     import torch
 
     library = torch.mps.compile_shader(BASELINE_SOURCE.read_text(encoding="utf-8"))
-    dims, threads, threadgroup = v1_launch(q_shape, kv_shape)
+    dims, threads, threadgroup = baseline_launch(q_shape, kv_shape)
     q, k, v = inputs
     device = q.device
     dims_tensor = torch.tensor(dims, dtype=torch.int32, device=device)
@@ -349,12 +355,12 @@ def main(argv: list[str] | None = None) -> int:
 
     calls = {
         "mlx": {
-            BASELINE: _v1_mlx_call(mlx_inputs, q_shape, kv_shape, scale),
+            BASELINE: _baseline_mlx_call(mlx_inputs, q_shape, kv_shape, scale),
             "kernel": lambda: flash_attention_hd32(*mlx_inputs, backend="mlx"),
             "builtin": lambda: mx.fast.scaled_dot_product_attention(*mlx_inputs, scale=scale),
         },
         "mps": {
-            BASELINE: _v1_mps_call(torch_inputs, q_shape, kv_shape, scale),
+            BASELINE: _baseline_mps_call(torch_inputs, q_shape, kv_shape, scale),
             "kernel": lambda: flash_attention_hd32(*torch_inputs, backend="mps"),
             "builtin": lambda: functional.scaled_dot_product_attention(*torch_inputs),
         },
@@ -438,10 +444,10 @@ def main(argv: list[str] | None = None) -> int:
         ratio = median_ratio_ci(timings[framework]["kernel"], timings[framework][BASELINE])
         print(
             f"{framework} kernel speed gate: {'passed' if speed_gate(ratio) else 'not passed'} "
-            f"(kernel/v1 median ratio {format_ratio(ratio)}); "
+            f"(kernel/{BASELINE_VERSION} median ratio {format_ratio(ratio)}); "
             f"speedup {mps_sdpa / kernel['median_ms']:.2f}x vs MPS SDPA, "
             f"{mlx_sdpa / kernel['median_ms']:.2f}x vs MLX SDPA, "
-            f"{baseline['median_ms'] / kernel['median_ms']:.2f}x vs v1"
+            f"{baseline['median_ms'] / kernel['median_ms']:.2f}x vs {BASELINE_VERSION}"
         )
     ratio = median_ratio_ci(timings["mps"]["kernel"], timings["mps"]["builtin"])
     print(
@@ -469,15 +475,23 @@ def main(argv: list[str] | None = None) -> int:
             "key_block": KEY_BLOCK,
             "rows_per_simdgroup": 8,
             "threadgroup_memory_bytes": THREADGROUP_MEMORY_BYTES,
-            "kv_load": "device to threadgroup (bf16), shared by 4 simdgroups",
+            "kv_load": (
+                "device to double-buffered threadgroup memory (16 KB for bf16, "
+                "32 KB for fp32), shared by 4 simdgroups"
+            ),
             "mma_inputs": "bf16 Q, K, V; fp32 P",
             "mma_accumulator": "fp32",
             "baseline": {
-                "version": "v1",
+                "version": BASELINE_VERSION,
                 "source": BASELINE_SOURCE.relative_to(_REPO).as_posix(),
-                "query_block": V1_QUERY_BLOCK,
-                "key_block": V1_KEY_BLOCK,
-                "threadgroup": V1_THREADGROUP_SIZE,
+                "query_block": BASELINE_QUERY_BLOCK,
+                "key_block": BASELINE_KEY_BLOCK,
+                "threadgroup": BASELINE_THREADGROUP_SIZE,
+                "threadgroup_memory_bytes": BASELINE_THREADGROUP_MEMORY_BYTES,
+                "kv_load": (
+                    "device to threadgroup memory (8 KB for bf16, 16 KB for fp32), "
+                    "shared by 4 simdgroups"
+                ),
             },
         },
     )

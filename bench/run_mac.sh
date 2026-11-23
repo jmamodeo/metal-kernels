@@ -7,11 +7,11 @@
 # Installs the Mac extra, runs the metal tests, then runs
 # bench/flash_attention_hd32.py with --record. The record goes to
 # bench/results/flash_attention_hd32.jsonl through bench/record.py. The
-# benchmark interleaves the frozen v1 baseline, the candidate and the built-in
+# benchmark interleaves the frozen v6 baseline, the candidate and the built-in
 # on every iteration, in a balanced rotating order (102 timed plus 12 warmup by
 # default), and prints the max and mean abs error against sdpa_reference,
 # median/min/p10/p90 ms per call for all six variants, the speed gate (paired
-# bootstrap 95% CI of the median candidate/v1 ratio entirely below 1), the
+# bootstrap 95% CI of the median candidate/v6 ratio entirely below 1), the
 # reported candidate/MPS SDPA ratio CI, and the git SHA. Nothing is committed.
 set -euo pipefail
 
@@ -29,7 +29,10 @@ case "$version" in
         default_design="tiled simdgroup_matrix: one threadgroup of 4 simdgroups per 32 query rows, 8 rows per simdgroup, 64-key K/V blocks loaded per lane from device into registers as vectors (no threadgroup memory, no barriers), bf16 simdgroup_matrix inputs with fp32 S and O accumulators (P stays fp32), exp2 online softmax with shuffle-xor row reductions"
         ;;
     v6)
-        default_design="v1 tiling (32 query rows, 4 simdgroups x 8 rows, 64-key blocks, bf16 simdgroup_matrix inputs, fp32 P and accumulators, always-applied exp2 correction) with each K/V block loaded once by all 128 threads into 8 KB of bf16 threadgroup memory shared by the 4 simdgroups, zero-filled past key_length, barrier after the load and before the next block"
+        default_design="v1 tiling (32 query rows, 4 simdgroups x 8 rows, 64-key blocks, bf16 simdgroup_matrix inputs, fp32 P and accumulators, always-applied exp2 correction) with each K/V block loaded once by all 128 threads into threadgroup memory (8 KB for bf16, 16 KB for fp32) shared by the 4 simdgroups, zero-filled past key_length, barrier after the load and before the next block"
+        ;;
+    v7)
+        default_design="v6 with the K/V stage double buffered in threadgroup memory (16 KB for bf16, 32 KB for fp32): the next 64-key block's device loads are issued into registers before the current block's math and stored into the other buffer after it, one barrier per block instead of two"
         ;;
     *)
         default_design=""

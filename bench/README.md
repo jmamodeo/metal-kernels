@@ -11,36 +11,39 @@ Shaders) on a named machine, shape, and dtype.
 `flash_attention_hd32.py` times three variants per framework on the same bf16
 inputs at `[1, 8, 5184, 32]`, through MLX and through PyTorch MPS:
 
-- `v1`: the frozen v1 shader in `bench/baselines/flash_attention_hd32_v1.metal`
-  (32 query rows, 64-key blocks, online-softmax correction on every block). Only
+- `v6`: the frozen v6 shader in `bench/baselines/flash_attention_hd32_v6.metal`,
+  a byte-for-byte copy of the kernel merged in `b2e6847` (32 query rows, 64-key
+  blocks, K/V staged in threadgroup memory: 8 KB for bf16, 16 KB for fp32). Only
   the benchmark compiles and launches it; the public `flash_attention_hd32`
   still runs only the kernel in `kernels/flash_attention_hd32/`. Do not edit
-  the frozen copy to track the candidate.
+  the frozen copy to track the candidate. The earlier frozen v1 shader,
+  `bench/baselines/flash_attention_hd32_v1.metal`, is kept unchanged for the
+  v1–v6 records that were timed against it, but is no longer launched.
 - `kernel`: the candidate, `flash_attention_hd32`.
 - `builtin`: `mx.fast.scaled_dot_product_attention` or
   `torch.nn.functional.scaled_dot_product_attention` on MPS.
 
-For each framework, every warmup and timed iteration calls v1, the candidate
+For each framework, every warmup and timed iteration calls v6, the candidate
 and the built-in once each before the next iteration starts, so all three see
 the same machine state. The order is not fixed: iterations walk
 `BALANCED_SCHEDULE`, a Williams design over all six orders of the three
 variants. Over each six-iteration cycle, every variant takes every position
 twice and runs right after each other variant three times (counting from one
 iteration's last call to the next iteration's first), never after itself. A
-fixed order, or a plain cyclic rotation, would keep v1 running after the
+fixed order, or a plain cyclic rotation, would keep v6 running after the
 slower built-in more often than the candidate does. Defaults are 102 timed
 iterations plus 12 warmup (`--iterations`, `--warmup`), whole cycles, so the
 default run is exactly balanced; other counts that are not multiples of 6 print
 a note. It prints median, min, p10 and p90 ms per call and
 TFLOP/s (FLOPs = `4 * B * H * Lq * Lk * D`) for all six variants, plus the max
 and mean abs error of each against `sdpa_reference` in fp32 on the bf16-rounded
-inputs, and the candidate's speedup over MPS SDPA, MLX SDPA and v1.
+inputs, and the candidate's speedup over MPS SDPA, MLX SDPA and v6.
 
 A kernel passes correctness when it is within `rtol = 2e-2`, `atol = 1e-2` of
 both the reference and the built-in, and its max abs error is no larger than
 PyTorch MPS SDPA's. Correctness alone decides the exit code. Separately, the
-speed gate pairs the candidate and v1 samples from the same iteration of each
-framework's interleave and takes the per-iteration ratio `candidate_ms / v1_ms`.
+speed gate pairs the candidate and v6 samples from the same iteration of each
+framework's interleave and takes the per-iteration ratio `candidate_ms / v6_ms`.
 It passes for a framework only if the bootstrap 95% confidence interval of the
 median ratio lies entirely below 1 (`record.median_ratio_ci`: percentile
 bootstrap, 10,000 resamples, fixed seed 0, so the result is reproducible).
@@ -48,7 +51,7 @@ p10, median and p90 are still printed and recorded, but do not decide the gate.
 The same paired interval for the MPS candidate over MPS SDPA, from the MPS
 interleave, is printed as the M3 target check; it does not gate. No interval is
 formed across the MLX and MPS loops, which run separately. The gate is printed
-and recorded; `bench/run_mac.sh v1` times v1 against itself, so its interval
+and recorded; `bench/run_mac.sh v6` times v6 against itself, so its interval
 should straddle 1 and it is not expected to pass. The recorded `bytes_per_call` is the compulsory traffic
 (q, k and v read once, O written once) for every variant.
 
@@ -56,11 +59,12 @@ On the Mac, one command installs the `mac` extra, runs `pytest -m metal`, runs
 the benchmark with `--record --version <version>`, and prints the git SHA:
 
 ```bash
-bench/run_mac.sh v6
+bench/run_mac.sh v7
 ```
 
-It uses `./.venv` when present. The current kernel is v6. `v0`, `v1` and `v6`
-have a default design text; other versions pass theirs as a second argument:
+It uses `./.venv` when present. v7 is the current kernel, timed against the
+frozen v6; a later candidate is kept only if its paired median-ratio bootstrap 95% CI against the frozen baseline lies entirely below 1 on both MLX and MPS and its max abs error is no worse than MPS SDPA's; otherwise it is recorded as a negative result. `v0`, `v1`, `v6` and
+`v7` have a default design text; other versions pass theirs as a second argument:
 `bench/run_mac.sh v3 "TEXT"`. The script appends to
 `bench/results/flash_attention_hd32.jsonl` and commits nothing.
 
@@ -112,7 +116,7 @@ order, and hold `median_ratio`, `ci_low`, `ci_high`, `level`, `resamples`,
 `seed` and `pairs`.
 `shape` and the optional `launch_config` are JSON-serializable dictionaries;
 the latter can capture query/key blocks, threads, and threadgroup memory
-(`threadgroup_memory_bytes` is 8192 for `flash_attention_hd32`, its bf16 K/V stage).
+(`threadgroup_memory_bytes` is 16384 for `flash_attention_hd32`, its double-buffered bf16 K/V stage, and 8192 for the frozen v6 under `launch_config.baseline`).
 
 `correctness` is keyed by the same frameworks. Each entry contains
 `reference` and `builtin` dictionaries with `max_abs_error` and
