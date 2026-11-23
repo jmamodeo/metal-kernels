@@ -21,9 +21,17 @@ inputs at `[1, 8, 5184, 32]`, through MLX and through PyTorch MPS:
   `torch.nn.functional.scaled_dot_product_attention` on MPS.
 
 For each framework, every warmup and timed iteration calls v1, the candidate
-and the built-in in turn before the next iteration starts, so all three see the
-same machine state. Defaults are 100 timed iterations plus 10 warmup
-(`--iterations`, `--warmup`). It prints median, p10 and p90 ms per call and
+and the built-in once each before the next iteration starts, so all three see
+the same machine state. The order is not fixed: iterations walk
+`BALANCED_SCHEDULE`, a Williams design over all six orders of the three
+variants. Over each six-iteration cycle, every variant takes every position
+twice and runs right after each other variant three times (counting from one
+iteration's last call to the next iteration's first), never after itself. A
+fixed order, or a plain cyclic rotation, would keep v1 running after the
+slower built-in more often than the candidate does. Defaults are 102 timed
+iterations plus 12 warmup (`--iterations`, `--warmup`), whole cycles, so the
+default run is exactly balanced; other counts that are not multiples of 6 print
+a note. It prints median, p10 and p90 ms per call and
 TFLOP/s (FLOPs = `4 * B * H * Lq * Lk * D`) for all six variants, plus the max
 and mean abs error of each against `sdpa_reference` in fp32 on the bf16-rounded
 inputs, and the candidate's speedup over MPS SDPA, MLX SDPA and v1.

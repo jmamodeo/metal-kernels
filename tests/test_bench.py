@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import subprocess
 import sys
 from pathlib import Path
@@ -113,8 +114,57 @@ def test_flash_attention_bench_defaults_to_100_iterations_plus_warmup():
     args = bench.parse_args([])
     assert args.iterations >= 100 and args.warmup >= 1
     assert (args.iterations, args.warmup) == (bench.DEFAULT_ITERATIONS, bench.DEFAULT_WARMUP)
+    # Whole schedule cycles, so the default run is exactly balanced.
+    assert args.iterations % bench.SCHEDULE_CYCLE == 0
+    assert args.warmup % bench.SCHEDULE_CYCLE == 0
     args = bench.parse_args(["--iterations", "7", "--warmup", "0"])
     assert (args.iterations, args.warmup) == (7, 0)
+
+
+def _position_and_predecessor_counts(orders):
+    from collections import Counter
+
+    positions = Counter((name, position) for order in orders for position, name in enumerate(order))
+    calls = [name for order in orders for name in order]
+    # Cyclic, so the step from the last call back to the first counts too.
+    predecessors = Counter(zip([calls[-1], *calls[:-1]], calls))
+    return positions, predecessors
+
+
+def test_flash_attention_bench_williams_schedule_is_balanced():
+    bench = _load_flash_attention_bench()
+    assert sorted(bench.BALANCED_SCHEDULE) == sorted(itertools.permutations(range(3)))
+    for iterations in (bench.SCHEDULE_CYCLE, bench.DEFAULT_ITERATIONS):
+        for start in (0, 1, bench.DEFAULT_WARMUP):
+            orders = bench.balanced_schedule(bench.VARIANTS, iterations, start=start)
+            positions, predecessors = _position_and_predecessor_counts(orders)
+            per_position = iterations // 3
+            assert positions == {
+                (name, position): per_position for name in bench.VARIANTS for position in range(3)
+            }
+            # Each variant follows each other variant equally often, never itself.
+            per_pair = iterations // 2
+            assert predecessors == {
+                (before, after): per_pair
+                for before in bench.VARIANTS
+                for after in bench.VARIANTS
+                if before != after
+            }
+    with pytest.raises(ValueError, match="exactly 3"):
+        bench.balanced_schedule(("a", "b"), 6)
+
+
+def test_flash_attention_bench_cyclic_rotation_is_not_enough():
+    # A cyclic Latin square balances positions, but inside an iteration v1
+    # only ever runs right after the built-in, so the built-in precedes it
+    # twice as often as the candidate does. The Williams schedule removes that.
+    bench = _load_flash_attention_bench()
+    names = bench.VARIANTS
+    cyclic = [names[i:] + names[:i] for i in range(3)] * 2
+    positions, predecessors = _position_and_predecessor_counts(cyclic)
+    assert set(positions.values()) == {2}
+    assert predecessors[("builtin", "baseline")] == 4
+    assert predecessors[("kernel", "baseline")] == 2
 
 
 def test_flash_attention_bench_interleaves_variants():
@@ -130,13 +180,19 @@ def test_flash_attention_bench_interleaves_variants():
 
     calls = {name: make(name) for name in bench.VARIANTS}
     syncs = []
-    samples, outputs = bench.time_interleaved(calls, syncs.append, warmup=2, iterations=3)
+    warmup, iterations = 2, 6
+    samples, outputs = bench.time_interleaved(calls, syncs.append, warmup, iterations)
     assert bench.VARIANTS == ("baseline", "kernel", "builtin")
-    assert log == list(bench.VARIANTS) * 5
-    assert {name: len(values) for name, values in samples.items()} == dict.fromkeys(calls, 3)
+    schedule = bench.balanced_schedule(bench.VARIANTS, warmup + iterations)
+    expected = [name for order in schedule for name in order]
+    assert log == expected
+    # Every iteration calls each variant once before the next starts.
+    assert all(sorted(log[i : i + 3]) == sorted(bench.VARIANTS) for i in range(0, len(log), 3))
+    assert {name: len(values) for name, values in samples.items()} == dict.fromkeys(calls, 6)
     assert outputs == {name: name for name in calls}
     # Every timed call is synchronized before it starts and after it returns.
-    assert syncs[6:] == [value for name in bench.VARIANTS * 3 for value in (None, name)]
+    timed = expected[3 * warmup :]
+    assert syncs[3 * warmup :] == [value for name in timed for value in (None, name)]
 
 
 def test_flash_attention_bench_frozen_v1_baseline():

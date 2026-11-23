@@ -12,8 +12,9 @@ Six variants run on the same bf16 inputs at ``[1, 8, 5184, 32]``:
 - ``mps builtin``: ``torch.nn.functional.scaled_dot_product_attention`` on MPS
 
 For each framework, every warmup and timed iteration calls v1, the candidate
-and the built-in in turn, so all three see the same machine state. Each
-prints median, p10 and p90 ms per call and TFLOP/s, with
+and the built-in once each, in an order taken from ``BALANCED_SCHEDULE`` (a
+Williams design: every variant takes every position, and follows each other
+variant, equally often over one six-iteration cycle). Each prints median, p10 and p90 ms per call and TFLOP/s, with
 FLOPs = ``4 * B * H * Lq * Lk * D``. Errors are measured against
 ``reference.sdpa.sdpa_reference`` in fp32 on the bf16-rounded inputs.
 
@@ -57,11 +58,20 @@ DTYPE = "bfloat16"
 RTOL = 2e-2
 ATOL = 1e-2
 FRAMEWORKS = ("mlx", "mps")
-# Interleaving order inside each iteration.
 VARIANTS = (BASELINE, "kernel", "builtin")
 LABELS = {BASELINE: "v1", "kernel": "kernel", "builtin": "builtin"}
-DEFAULT_WARMUP = 10
-DEFAULT_ITERATIONS = 100
+# Williams design for three variants: all six orders, sequenced so that over
+# one cycle each variant takes each position twice and, counting the step from
+# one iteration's last call to the next iteration's first, is preceded by each
+# other variant three times and never by itself. A plain cyclic rotation
+# balances positions but would always run the v1 baseline right after the
+# built-in. Iteration i uses BALANCED_SCHEDULE[i % 6], as indices into
+# VARIANTS.
+BALANCED_SCHEDULE = ((0, 1, 2), (0, 2, 1), (2, 1, 0), (1, 0, 2), (1, 2, 0), (2, 0, 1))
+SCHEDULE_CYCLE = len(BALANCED_SCHEDULE)
+# Whole cycles, so the defaults are exactly balanced.
+DEFAULT_WARMUP = 2 * SCHEDULE_CYCLE
+DEFAULT_ITERATIONS = 17 * SCHEDULE_CYCLE
 
 # Frozen v1 baseline: its own source and launch geometry, independent of the
 # candidate in kernels/flash_attention_hd32/.
@@ -148,6 +158,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     validate_record_arguments(parser, args)
     if args.warmup < 0 or args.iterations < 1:
         parser.error("--warmup must be >= 0 and --iterations >= 1")
+    if args.warmup % SCHEDULE_CYCLE or args.iterations % SCHEDULE_CYCLE:
+        print(
+            f"note: --warmup and --iterations that are multiples of {SCHEDULE_CYCLE} keep "
+            "the call order exactly balanced",
+            file=sys.stderr,
+        )
     return args
 
 
@@ -165,21 +181,39 @@ def _reference(q, k, v):
     return out
 
 
-def time_interleaved(calls: dict, synchronize, warmup: int, iterations: int) -> tuple[dict, dict]:
-    """Time ``calls`` round-robin and return ``(samples_ms, last_outputs)``.
+def balanced_schedule(names, iterations: int, start: int = 0) -> list[tuple]:
+    """Call order for each of ``iterations`` iterations, from ``BALANCED_SCHEDULE``.
 
-    Each warmup and timed iteration runs every call once, in ``calls`` order,
-    before the next iteration starts. Each timed call is synchronized before
-    and after, so samples are per-call GPU wall time.
+    ``names`` are the three variants; iteration ``i`` uses cycle entry
+    ``(start + i) % SCHEDULE_CYCLE``. Exactly balanced when ``iterations`` is
+    a multiple of ``SCHEDULE_CYCLE``.
+    """
+    names = tuple(names)
+    if len(names) != len(BALANCED_SCHEDULE[0]):
+        raise ValueError(f"the balanced schedule needs exactly {len(BALANCED_SCHEDULE[0])} calls")
+    return [
+        tuple(names[index] for index in BALANCED_SCHEDULE[(start + i) % SCHEDULE_CYCLE])
+        for i in range(iterations)
+    ]
+
+
+def time_interleaved(calls: dict, synchronize, warmup: int, iterations: int) -> tuple[dict, dict]:
+    """Time ``calls`` interleaved and return ``(samples_ms, last_outputs)``.
+
+    Each warmup and timed iteration runs every call once before the next
+    iteration starts, in the order given by :func:`balanced_schedule`. The
+    schedule continues from warmup into the timed iterations. Each timed call
+    is synchronized before and after, so samples are per-call GPU wall time.
     """
     outputs = dict.fromkeys(calls)
     samples = {name: [] for name in calls}
-    for _ in range(warmup):
-        for name, call in calls.items():
-            outputs[name] = call()
+    for order in balanced_schedule(calls, warmup):
+        for name in order:
+            outputs[name] = calls[name]()
             synchronize(outputs[name])
-    for _ in range(iterations):
-        for name, call in calls.items():
+    for order in balanced_schedule(calls, iterations, start=warmup):
+        for name in order:
+            call = calls[name]
             synchronize(None)
             start = time.perf_counter()
             outputs[name] = call()

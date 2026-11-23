@@ -8,10 +8,10 @@
 # bench/flash_attention_hd32.py with --record. The record goes to
 # bench/results/flash_attention_hd32.jsonl through bench/record.py. The
 # benchmark interleaves the frozen v1 baseline, the candidate and the built-in
-# on every iteration (100 timed plus 10 warmup by default) and prints the max
-# and mean abs error against sdpa_reference, median/p10/p90 ms per call for
-# all six variants, the speed gate against v1, and the git SHA. Nothing is
-# committed.
+# on every iteration, in a balanced rotating order (102 timed plus 12 warmup by
+# default), and prints the max and mean abs error against sdpa_reference,
+# median/p10/p90 ms per call for all six variants, the speed gate against v1,
+# and the git SHA. Nothing is committed.
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 || -z "$1" ]]; then
