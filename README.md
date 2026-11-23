@@ -64,7 +64,7 @@ The base package has no required dependencies. `pip install -e .` inside `python
 
 | Extra | What it installs | When it is used |
 | --- | --- | --- |
-| `dev` | pytest, NumPy | running the test suite |
+| `dev` | pytest, NumPy, build | running the test suite |
 | `reference` | NumPy | running oracle code |
 | `mlx` | MLX | Apple silicon, once a kernel calls `mx.fast.metal_kernel` |
 | `torch` | PyTorch | once a kernel calls `torch.mps.compile_shader` |
@@ -80,7 +80,7 @@ python -m metal_kernels
 
 `pytest` skips Metal execution tests when no Metal device is available. `python -m metal_kernels` prints the registry.
 
-An editable install from a checkout is the supported way to find `kernels/`. The loader also honors `METAL_KERNELS_ROOT` when that variable points at the `kernels` directory. A non-editable wheel does not yet vendor the `.metal` sources.
+An editable install from a checkout finds `kernels/` at the repository root. A wheel or sdist install vendors those `.metal` sources inside the package. The loader also honors `METAL_KERNELS_ROOT` when that variable points at the `kernels` directory.
 
 ### Swift
 

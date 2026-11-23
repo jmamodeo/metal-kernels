@@ -1,8 +1,20 @@
-# metal_kernels
+# metal-kernels
 
-Python package for the metal-kernels collection. See the [repository README](../README.md) for the goal, the per-kernel workflow, and install instructions.
+Python package for [metal-kernels](https://github.com/jmamodeo/metal-kernels), a collection of Apple Metal GPU kernels for Apple silicon. The collection currently has FlashAttention for head dim 32.
 
-Kernel sources live in `../kernels`. That `.metal` file is the only copy. Importing `metal_kernels` returns that text and does not import MLX or PyTorch. A kernel's launch module compiles its `.metal` source on first launch, through MLX or PyTorch MPS.
+```bash
+python3 -m pip install metal-kernels
+```
+
+The base package has no required dependencies. Optional extras (`mlx`, `torch`, `reference`, `dev`, `mac`) are listed in the [repository README](https://github.com/jmamodeo/metal-kernels#install). From a checkout, the development install is `python3 -m pip install -e "./python[dev]"` at the repository root.
+
+The `.metal` file in [`kernels/`](https://github.com/jmamodeo/metal-kernels/tree/main/kernels) is the only copy of each shader. The package vendors that source and returns its text on import. It does not import MLX or PyTorch. A kernel's launch module compiles the source on first launch, through MLX or PyTorch MPS.
+
+```python
+from metal_kernels.flash_attention import flash_attention_hd32
+
+out = flash_attention_hd32(q, k, v, bias=None, scale=None, backend="mlx")  # or backend="mps"
+```
 
 ## SAM 3 on MPS
 
@@ -15,8 +27,4 @@ install()  # cuda if present, else mps, else cpu
 model = build_image_model(load_from_HF=False)
 ```
 
-The ViT MLP uses linear plus GELU on CPU and MPS. On CUDA the original fused op is left in place. MPS itself is not executed by the tests in this repository. `bench/sam3_shapes/README.md` is the command that times the built-in kernels on a Mac.
-
-```bash
-python3 -m pip install -e ".[dev]"
-```
+The ViT MLP uses linear plus GELU on CPU and MPS. On CUDA the original fused op is left in place. MPS itself is not executed by the tests in this repository. The command that times the built-in kernels on a Mac is in [`bench/sam3_shapes/README.md`](https://github.com/jmamodeo/metal-kernels/blob/main/bench/sam3_shapes/README.md).
