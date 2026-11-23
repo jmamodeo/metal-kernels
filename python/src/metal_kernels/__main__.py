@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Print the kernel registry. It is empty until a kernel is added."""
+"""Print the kernel registry."""
 
 from __future__ import annotations
 

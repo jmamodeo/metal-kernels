@@ -21,10 +21,10 @@ class KernelNotFoundError(KeyError):
 def kernels_root() -> Path:
     """Return the ``kernels`` directory.
 
-    ``METAL_KERNELS_ROOT`` wins when it is set. Otherwise the directory is
-    found by walking up from this file looking for ``kernels/_template``,
-    which an editable install from a checkout can see. A non-editable wheel
-    does not vendor kernel sources yet.
+    ``METAL_KERNELS_ROOT`` wins when it is set. Otherwise a wheel or sdist
+    install uses the ``kernels`` directory vendored next to this module. If
+    that is missing, the loader walks up from this file looking for
+    ``kernels/_template``, which an editable install from a checkout can see.
     """
     override = os.environ.get(_ENV_VAR, "").strip()
     if override:
@@ -33,6 +33,10 @@ def kernels_root() -> Path:
             raise FileNotFoundError(f"{_ENV_VAR}={override!r} is not a directory")
         return path
 
+    packaged = Path(__file__).resolve().parent / "kernels"
+    if packaged.is_dir() and any(_is_kernel_dir(child) for child in packaged.iterdir()):
+        return packaged
+
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "kernels"
@@ -40,9 +44,9 @@ def kernels_root() -> Path:
             return candidate
 
     raise FileNotFoundError(
-        "Could not find the kernels directory. Install the package editable "
-        "from a git checkout (pip install -e ./python) or set "
-        f"{_ENV_VAR} to the kernels directory."
+        "Could not find the kernels directory. Reinstall metal-kernels, "
+        "install it editable from a git checkout (pip install -e ./python), "
+        f"or set {_ENV_VAR} to the kernels directory."
     )
 
 

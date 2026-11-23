@@ -81,13 +81,15 @@ Weight loading and a demo sit on top of the baseline above.
 
 The `.metal` shader in `kernels/` is the source of truth. Python and Swift hosts load that file.
 
+The Python package is registered on PyPI early as a source-plus-shader wheel: the sdist and wheel vendor the `.metal` sources, which compile on first launch. A later macOS arm64 wheel can add a precompiled `.metallib`.
+
 ### Source release
 
-The first release is v0.1.0: FlashAttention for head dim 32, shipped as source. Install from a checkout, as the README describes. There is no versioned wheel or package tag yet.
+v0.1.0 is the first source release: FlashAttention for head dim 32. Install from a checkout, as the README describes, or from PyPI with `pip install metal-kernels` once that package is published.
 
-### PyPI wheel
+### PyPI
 
-Once the collection has two or three kernels, a single PyPI wheel for macOS arm64 can bundle a precompiled `.metallib` with thin PyTorch MPS and MLX entry points. Publishing a wheel is a later step, not part of the source release.
+The `metal-kernels` package ships the shared `.metal` sources. Publishing each version to PyPI is a separate, versioned step. A later macOS arm64 wheel can bundle a precompiled `.metallib` with the same PyTorch MPS and MLX entry points.
 
 ### Swift package
 

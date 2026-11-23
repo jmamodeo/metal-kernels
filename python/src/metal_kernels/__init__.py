@@ -22,7 +22,7 @@ from metal_kernels.platform import host_is_macos
 try:
     __version__ = version("metal-kernels")
 except PackageNotFoundError:
-    __version__ = "0.0.0"
+    __version__ = "0.1.1"
 
 __all__ = [
     "KernelNotFoundError",
