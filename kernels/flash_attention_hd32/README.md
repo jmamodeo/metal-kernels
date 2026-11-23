@@ -4,7 +4,7 @@ Fused scaled dot-product attention for head dim 32, written for the SAM 3 detect
 
 ## Status
 
-Version 6 (candidate, MTL-29): the v1 tiled `simdgroup_matrix` kernel with each 64-key K/V block copied once per threadgroup into threadgroup memory, in bf16, and shared by the four simdgroups. Every simdgroup builds the same K and V tiles as v1, so the output should be identical to v1's. v6 has not yet been timed; `bench/run_mac.sh v6 "TEXT"` tests, benchmarks and records it against the frozen v1.
+Version 6 (candidate, MTL-29): the v1 tiled `simdgroup_matrix` kernel with each 64-key K/V block copied once per threadgroup into threadgroup memory, in bf16, and shared by the four simdgroups. Every simdgroup builds the same K and V tiles as v1, so the output should be identical to v1's. v6 has not yet been timed; `bench/run_mac.sh v6` tests, benchmarks and records it against the frozen v1.
 
 Version 1 (32 query rows, 128 threads, 64-key K/V blocks loaded from device into registers, bf16 GEMM inputs, fp32 P) kept the v0 interface: the same Python API, buffers, `dims` layout, bias semantics and tolerances. On the M3 Max at `[1, 8, 5184, 32]` bf16 it runs at 4.12 ms (MLX path) against MLX SDPA's 8.41 ms in the same record (2.04×), and 4.17 ms (MPS path) against MPS SDPA's 3.91 ms, with max abs error equal to MPS SDPA's. `bench/run_mac.sh v1` tests, benchmarks and records it. Earlier versions and a recorded v2 trial are in [docs/ROADMAP.md](../../docs/ROADMAP.md).
 
