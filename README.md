@@ -47,20 +47,17 @@ Write the reference and the Python check before the Swift host. The Swift packag
 
 ## Install
 
-Installing these packages does not download any model weights. The commands below are the install paths now, and they stay the same once kernels exist.
+Installing these packages does not download any model weights.
 
 ### Python
 
-From a checkout:
+The published package is on PyPI and requires Python 3.10 or newer. This is the primary way to install the collection:
 
 ```bash
-cd python
-python3 -m pip install -e ".[dev]"
+python3 -m pip install metal-kernels
 ```
 
-From the repository root the same install is `python3 -m pip install -e "./python[dev]"`.
-
-The base package has no required dependencies. `pip install -e .` inside `python/` is enough to import the loader. The `dev` extra adds pytest and NumPy.
+The base package has no required dependencies and is enough to import the loader. Optional extras add the hosts and tools used to launch or test a kernel:
 
 | Extra | What it installs | When it is used |
 | --- | --- | --- |
@@ -69,7 +66,25 @@ The base package has no required dependencies. `pip install -e .` inside `python
 | `mlx` | MLX | Apple silicon, once a kernel calls `mx.fast.metal_kernel` |
 | `torch` | PyTorch | once a kernel calls `torch.mps.compile_shader` |
 
-MLX wheels and the PyTorch MPS backend are macOS only. A kernel's Python launch path imports them when it runs. They are not installed by the base package or the `dev` extra.
+```bash
+python3 -m pip install "metal-kernels[mlx]"
+python3 -m pip install "metal-kernels[torch]"
+```
+
+MLX wheels and the PyTorch MPS backend are macOS only. A kernel's Python launch path imports them when it runs. They are not installed by the base package.
+
+A wheel or sdist install vendors the `.metal` sources inside the package. The loader also honors `METAL_KERNELS_ROOT` when that variable points at a `kernels` directory.
+
+#### Development install from a checkout
+
+Use an editable install only when you are changing the package or running the test suite from this repository:
+
+```bash
+cd python
+python3 -m pip install -e ".[dev]"
+```
+
+From the repository root the same install is `python3 -m pip install -e "./python[dev]"`. An editable install from a checkout finds `kernels/` at the repository root.
 
 Then, from the repository root:
 
@@ -79,8 +94,6 @@ python -m metal_kernels
 ```
 
 `pytest` skips Metal execution tests when no Metal device is available. `python -m metal_kernels` prints the registry.
-
-An editable install from a checkout finds `kernels/` at the repository root. A wheel or sdist install vendors those `.metal` sources inside the package. The loader also honors `METAL_KERNELS_ROOT` when that variable points at the `kernels` directory.
 
 ### Swift
 
