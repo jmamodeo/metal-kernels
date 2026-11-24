@@ -111,7 +111,13 @@ As a local SwiftPM dependency:
 .package(path: "/path/to/metal-kernels")
 ```
 
-There is no version tag yet.
+To depend on the package from Git, track `main`:
+
+```swift
+.package(url: "https://github.com/jmamodeo/metal-kernels.git", branch: "main")
+```
+
+Release tags currently version the Python package on PyPI. Versioned SwiftPM tags are tracked in [#57](https://github.com/jmamodeo/metal-kernels/issues/57).
 
 `swift test` also checks that the bundled `kernels/` copy matches the checkout.
 
